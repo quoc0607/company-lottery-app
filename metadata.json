@@ -1,0 +1,5 @@
+{
+  "name": "Lottery Pro",
+  "description": "A high-end, multi-track lottery application for corporate events with Excel support, theme switching, and persistent state.",
+  "requestFramePermissions": []
+}
