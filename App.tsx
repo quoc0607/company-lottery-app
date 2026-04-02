@@ -148,7 +148,7 @@ const LotteryDisplayCard = memo<LotteryDisplayCardProps>(({
       {/* 部门 - 彩色标签 */}
       <div className="pb-6 pt-2 z-10 w-full flex justify-center">
         <span className={`
-          flex items-center gap-2 px-6 py-2 rounded-full font-bold tracking-wide text-base md:text-lg shadow-lg
+          flex items-center gap-2 px-6 py-2 rounded-full font-bold text-base md:text-lg shadow-lg
           ${isWinner
             ? 'bg-amber-800/70 text-amber-100 border-2 border-amber-300/60'
             : 'bg-black/70 text-gray-100 border border-white/30'}
@@ -170,7 +170,24 @@ const App: React.FC = () => {
   const getInitialState = useCallback(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : {};
+      if (!saved) return {};
+      
+      const parsed = JSON.parse(saved);
+      
+      const normalizeStrings = (obj: any): any => {
+        if (typeof obj === 'string') return obj.normalize('NFC');
+        if (Array.isArray(obj)) return obj.map(normalizeStrings);
+        if (typeof obj === 'object' && obj !== null) {
+          const newObj: any = {};
+          for (const key in obj) {
+            newObj[key] = normalizeStrings(obj[key]);
+          }
+          return newObj;
+        }
+        return obj;
+      };
+      
+      return normalizeStrings(parsed);
     } catch (e) { return {}; }
   }, []);
 
@@ -594,9 +611,9 @@ const App: React.FC = () => {
 
           return {
             id: `emp-${Date.now()}-${i}`,
-            staffId: String(row[colMap.staffId || ''] || row['A'] || '').trim(),
-            name: String(row[colMap.name || ''] || row['B'] || '').trim(),
-            department: String(row[colMap.dept || ''] || row['C'] || '').trim() || t('unassigned'),
+            staffId: String(row[colMap.staffId || ''] || row['A'] || '').trim().normalize('NFC'),
+            name: String(row[colMap.name || ''] || row['B'] || '').trim().normalize('NFC'),
+            department: String(row[colMap.dept || ''] || row['C'] || '').trim().normalize('NFC') || t('unassigned'),
             pool,
             weight,
           };
@@ -654,8 +671,8 @@ const App: React.FC = () => {
 
           return {
             id: `prize-${Date.now()}-${i}`,
-            tier: String(row[colMap.tier || ''] || row['A'] || '奖项').trim(),
-            name: String(row[colMap.name || ''] || row['B'] || row['C'] || '').trim(),
+            tier: String(row[colMap.tier || ''] || row['A'] || '奖项').trim().normalize('NFC'),
+            name: String(row[colMap.name || ''] || row['B'] || row['C'] || '').trim().normalize('NFC'),
             total: Number(row[colMap.total || ''] || row['D'] || 1),
             remain: Number(row[colMap.total || ''] || row['D'] || 1),
             pool,
@@ -827,7 +844,7 @@ const App: React.FC = () => {
               } prizeImage={currentPrizeImage} />
             ))}
           </div>
-          {/* <p className="mt-12 text-2xl text-yellow-300/60 font-black italic tracking-widest uppercase">{t('closeInstruction')}</p> */}
+          {/* <p className="mt-12 text-2xl text-yellow-300/60 font-black italic uppercase">{t('closeInstruction')}</p> */}
         </div>
       );
     }
@@ -844,9 +861,9 @@ const App: React.FC = () => {
           // 如果没有图片，可以显示一个默认图标（可选）
           <Sparkles size={160} className="text-yellow-400/10 mb-8 mx-auto" />
         )}
-        <h2 className="text-6xl font-black text-white/5 uppercase tracking-[0.5em] italic">{t('ready')}</h2>
+        <h2 className="text-6xl font-black text-white/5 uppercase italic">{t('ready')}</h2>
         {selectedPrize && (
-          <p className="text-2xl text-yellow-400 mt-6 font-black italic tracking-widest bg-yellow-400/10 px-8 py-3 rounded-full border border-yellow-400/20 backdrop-blur-md">
+          <p className="text-2xl text-yellow-400 mt-6 font-black italic bg-yellow-400/10 px-8 py-3 rounded-full border border-yellow-400/20 backdrop-blur-md">
             {selectedPrize.name} {selectedPrize.remain === 0 ? t('allDrawn') : t('selectAward')}
           </p>
         )}
@@ -862,11 +879,11 @@ const App: React.FC = () => {
             {companyLogo ? <img src={companyLogo} className="w-full h-full object-contain" /> : <Trophy className="text-red-700 w-7 h-7" />}
           </div>
         </div>
-        <h1 className="text-3xl md:text-5xl font-black tracking-widest italic text-transparent bg-clip-text bg-gradient-to-b from-amber-200 via-yellow-400 to-amber-700 drop-shadow-xl truncate px-6">{appTitle}</h1>
+        <h1 className="text-3xl md:text-5xl font-black italic text-transparent bg-clip-text bg-gradient-to-b from-amber-200 via-yellow-400 to-amber-700 drop-shadow-xl truncate px-6">{appTitle}</h1>
         <div className="flex items-center gap-4">
           <div className="flex gap-1 bg-white/5 p-1 rounded-xl border border-white/10">
             {['zh', 'en', 'vi'].map(lang => (
-              <button key={lang} onClick={() => changeLanguage(lang)} className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all ${i18n.language.startsWith(lang) ? 'bg-yellow-400 text-black' : 'text-white/40'}`}>
+              <button key={lang} onClick={() => changeLanguage(lang)} className={`px-3 py-1.5 rounded-lg text-xs font-black font-sans uppercase transition-all ${i18n.language.startsWith(lang) ? 'bg-yellow-400 text-black' : 'text-white/40'}`}>
                 {lang === 'zh' ? '中' : lang.toUpperCase()}
               </button>
             ))}
@@ -887,7 +904,7 @@ const App: React.FC = () => {
                     {selectedPrize.image ? <img src={selectedPrize.image} className="w-full h-full object-cover" /> : <Gift className="text-red-700 w-10 h-10 opacity-60" />}
                   </div>
                   <div className="flex flex-col">
-                    <div className="text-[11px] font-black uppercase tracking-widest text-yellow-400">{selectedPrize.tier}</div>
+                    <div className="text-[11px] font-black uppercase text-yellow-400">{selectedPrize.tier}</div>
                     <div className="text-2xl font-black text-white italic">{selectedPrize.name}</div>
                   </div>
                 </div>
@@ -898,14 +915,14 @@ const App: React.FC = () => {
               <div className="mt-4 flex flex-col items-center gap-8 z-30 w-full pb-8">  {/* gap-10 → gap-8，整体更紧凑 */}
                 {/* 模式切换按钮保持不变 */}
                 {isDrawing && drawMode === 'manual' ? (
-                  <button onClick={stopDraw} className="px-20 py-8 rounded-full text-2xl md:text-5xl font-black bg-red-600 text-white shadow-2xl animate-pulse active:scale-95">
+                  <button onClick={stopDraw} className="px-20 py-8 rounded-full text-2xl md:text-5xl font-black font-sans bg-red-600 text-white shadow-2xl animate-pulse active:scale-95">
                     {t('stopDraw')}
                   </button>
                 ) : (
                   <button
                     onClick={startDraw}
                     disabled={isDrawing || !selectedPrizeId || eligiblePool.length === 0 || selectedPrize?.remain === 0}
-                    className="px-16 py-6 rounded-full text-2xl md:text-4xl font-black transition-all active:scale-95 bg-white text-slate-900 shadow-xl hover:scale-105 hover:bg-yellow-400 disabled:opacity-40 disabled:grayscale"
+                    className="px-16 py-6 rounded-full text-2xl md:text-4xl font-black font-sans transition-all active:scale-95 bg-white text-slate-900 shadow-xl hover:scale-105 hover:bg-yellow-400 disabled:opacity-40 disabled:grayscale"
                   >
                     {isDrawing ? t('drawing') : t('startDraw')}
                   </button>
@@ -935,7 +952,7 @@ const App: React.FC = () => {
                     </div>
 
                     {/* 等级 */}
-                    <div className="text-sm font-black uppercase tracking-wider text-yellow-400/90 mb-2">
+                    <div className="text-sm font-black uppercase text-yellow-400/90 mb-2">
                       {p.tier}
                     </div>
 
@@ -979,7 +996,7 @@ const App: React.FC = () => {
               {winners.length === 0 ? (
                 <div className="py-48 text-center opacity-10 flex flex-col items-center">
                   <Users size={120} className="mb-8" />
-                  <p className="font-black tracking-widest uppercase text-3xl italic">{t('waitingForDraw')}</p>
+                  <p className="font-black uppercase text-3xl italic">{t('waitingForDraw')}</p>
                 </div>
               ) : (
                 <div className="space-y-10">
@@ -1060,7 +1077,7 @@ const App: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="mt-2 text-[10px] font-black uppercase tracking-wider opacity-70">{w.tier}</div>
+                        <div className="mt-2 text-[10px] font-black uppercase opacity-70">{w.tier}</div>
                       </div>
                     ))}
                   </div>
@@ -1068,14 +1085,14 @@ const App: React.FC = () => {
               )}
             </div>
             <div className="flex flex-col gap-4 pt-4 border-t border-white/10">
-              <button onClick={() => { if (winners.length > 0) { const data = winners.map(w => ({ '奖项': w.tier, '品名': w.prizeName, '中奖人': w.participantName, '工号': w.staffId, '部门': w.department, '时间': w.time })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Winners"); XLSX.writeFile(wb, `Winners_Export.xlsx`); } }} disabled={winners.length === 0} title={winners.length === 0 ? t('noWinnersYetTooltip') : ""} className="w-full py-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-[2.5rem] flex items-center justify-center gap-3 font-black shadow-2xl hover:scale-[1.02] disabled:opacity-40 transition-all"><Download size={26} /><span className="font-bold text-base uppercase tracking-widest">{t('exportWinners')}</span></button>
+              <button onClick={() => { if (winners.length > 0) { const data = winners.map(w => ({ '奖项': w.tier, '品名': w.prizeName, '中奖人': w.participantName, '工号': w.staffId, '部门': w.department, '时间': w.time })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Winners"); XLSX.writeFile(wb, `Winners_Export.xlsx`); } }} disabled={winners.length === 0} title={winners.length === 0 ? t('noWinnersYetTooltip') : ""} className="w-full py-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-[2.5rem] flex items-center justify-center gap-3 font-black font-sans shadow-2xl hover:scale-[1.02] disabled:opacity-40 transition-all"><Download size={26} /><span className="font-bold text-base uppercase">{t('exportWinners')}</span></button>
               <button
                 onClick={captureFullApp}
                 disabled={winners.length === 0}
-                className="w-full py-5 rounded-[2.5rem] flex items-center justify-center gap-3 font-black shadow-2xl transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white disabled:opacity-40 hover:scale-[1.02] active:scale-95"
+                className="w-full py-5 rounded-[2.5rem] flex items-center justify-center gap-3 font-black font-sans shadow-2xl transition-all bg-gradient-to-r from-purple-600 to-pink-600 text-white disabled:opacity-40 hover:scale-[1.02] active:scale-95"
               >
                 <ImageIcon size={26} />
-                <span className="font-bold text-base uppercase tracking-widest">
+                <span className="font-bold text-base uppercase">
                   {t('generatePoster')} / {t('captureFullApp')}
                 </span>
               </button>
@@ -1092,7 +1109,7 @@ const App: React.FC = () => {
               <div className="space-y-12">
                 <section className="space-y-8">
                   <h3 className="text-sm font-black text-blue-600 uppercase border-l-[6px] border-blue-600 pl-6">{t('identityBranding')}</h3>
-                  <div className="space-y-3"><label className="text-[11px] font-black text-slate-400 uppercase tracking-widest">{t('eventMainTitle')}</label><input type="text" value={appTitle} onChange={(e) => setAppTitle(e.target.value)} className="w-full bg-slate-50 border-4 border-slate-50 rounded-3xl px-8 py-5 font-black text-xl italic focus:border-blue-500 outline-none" /></div>
+                  <div className="space-y-3"><label className="text-[11px] font-black text-slate-400 uppercase">{t('eventMainTitle')}</label><input type="text" value={appTitle} onChange={(e) => setAppTitle(e.target.value.normalize('NFC'))} className="w-full bg-slate-50 border-4 border-slate-50 rounded-3xl px-8 py-5 font-black text-xl italic focus:border-blue-500 outline-none" /></div>
                   <div className="h-32 bg-slate-50 border-4 border-dashed border-slate-100 rounded-3xl flex items-center justify-center relative group overflow-hidden">
                     {companyLogo ? <><img src={companyLogo} className="h-full object-contain p-4" /><div className="absolute inset-0 bg-black/80 text-white flex items-center justify-center font-black cursor-pointer opacity-0 group-hover:opacity-100" onClick={() => setCompanyLogo(null)}>{t('removeAsset')}</div></> : <div className="flex flex-col items-center opacity-40"><Upload size={40} className="mb-2" /><span className="text-[11px] font-black uppercase">{t('uploadBrandLogo')}</span></div>}
                     <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = () => setCompanyLogo(r.result as string); r.readAsDataURL(f); } }} />
@@ -1134,7 +1151,7 @@ const App: React.FC = () => {
                         <button
                           key={item.value}
                           onClick={() => setTheme(item.value)}
-                          className={`p-4 rounded-xl font-black text-sm transition-all transform hover:scale-105 active:scale-95 shadow-md ${theme === item.value
+                          className={`p-4 rounded-xl font-black font-sans text-sm transition-all transform hover:scale-105 active:scale-95 shadow-md ${theme === item.value
                             ? 'ring-4 ring-purple-400 ring-offset-2 ' + item.color
                             : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
                             }`}
@@ -1209,7 +1226,7 @@ const App: React.FC = () => {
                         <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = () => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, image: r.result as string } : x)); r.readAsDataURL(f); } }} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-black text-blue-500 uppercase tracking-widest italic">{p.tier}</div>
+                        <div className="text-xs font-black text-blue-500 uppercase italic">{p.tier}</div>
                         <div className="text-2xl font-black text-slate-900 truncate leading-tight italic">{p.name}</div>
                         <div className="text-[11px] font-black text-slate-400 mt-3 flex items-center gap-4"><span className="bg-slate-100 px-3 py-1 rounded-full">{t('stock')}: {p.total}</span><span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full">{t('remaining')}: {p.remain}</span></div>
                       </div>
@@ -1231,7 +1248,7 @@ const App: React.FC = () => {
                     className="p-6 bg-green-50 border-2 border-green-100 rounded-3xl transition-all flex flex-col items-center gap-2 hover:bg-green-100 hover:scale-105 active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isResetting ? <Loader2 className="w-6 h-6 text-green-600 animate-spin" /> : <RotateCcw className="w-6 h-6 text-green-600" />}
-                    <span className="text-[10px] font-black uppercase">{t('softReset')}</span>
+                    <span className="text-[10px] font-black font-sans uppercase">{t('softReset')}</span>
                   </button>
 
                   <button
@@ -1240,7 +1257,7 @@ const App: React.FC = () => {
                     className="p-6 bg-orange-50 border-2 border-orange-100 rounded-3xl transition-all flex flex-col items-center gap-2 hover:bg-orange-100 hover:scale-105 active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isResetting ? <Loader2 className="w-6 h-6 text-orange-600 animate-spin" /> : <Package className="w-6 h-6 text-orange-600" />}
-                    <span className="text-[10px] font-black uppercase">{t('hardReset')}</span>
+                    <span className="text-[10px] font-black font-sans uppercase">{t('hardReset')}</span>
                   </button>
 
                   <button
@@ -1249,7 +1266,7 @@ const App: React.FC = () => {
                     className="p-6 bg-red-50 border-2 border-red-100 rounded-3xl transition-all flex flex-col items-center gap-2 hover:bg-red-100 hover:scale-105 active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isResetting ? <Loader2 className="w-6 h-6 text-red-600 animate-spin" /> : <Trash2 className="w-6 h-6 text-red-600" />}
-                    <span className="text-[10px] font-black uppercase text-red-700">{t('eraseAll')}</span>
+                    <span className="text-[10px] font-black font-sans uppercase text-red-700">{t('eraseAll')}</span>
                   </button>
                 </div>
               </div>
@@ -1281,7 +1298,7 @@ const App: React.FC = () => {
                   setShowRemoveConfirm(false);
                   setRemoveWinnerInfo(null);
                 }}
-                className="flex-1 py-4 bg-slate-200 rounded-xl font-black hover:bg-slate-300 transition-colors"
+                className="flex-1 py-4 bg-slate-200 rounded-xl font-black font-sans hover:bg-slate-300 transition-colors"
               >
                 {t('cancel')}
               </button>
@@ -1316,7 +1333,7 @@ const App: React.FC = () => {
                     values: { name: removeWinnerInfo.name }
                   });
                 }}
-                className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black shadow-lg transition-colors"
+                className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black font-sans shadow-lg transition-colors"
               >
                 {t('confirmDelete')}
               </button>
@@ -1341,7 +1358,7 @@ const App: React.FC = () => {
                   setShowConfirmModal(false);
                   setConfirmConfig(null);
                 }}
-                className="flex-1 py-4 bg-slate-200 rounded-xl font-black hover:bg-slate-300 transition-colors"
+                className="flex-1 py-4 bg-slate-200 rounded-xl font-black font-sans hover:bg-slate-300 transition-colors"
               >
                 {t('cancel')}   {/* ← 这里用 t('cancel')，会根据语言自动变：取消 / Cancel / Hủy */}
               </button>
@@ -1352,7 +1369,7 @@ const App: React.FC = () => {
                   setConfirmConfig(null);
                   confirmConfig.onConfirm();
                 }}
-                className={`flex-1 py-4 rounded-xl font-black text-white shadow-lg transition-colors ${confirmConfig.danger
+                className={`flex-1 py-4 rounded-xl font-black font-sans text-white shadow-lg transition-colors ${confirmConfig.danger
                   ? 'bg-red-600 hover:bg-red-700'
                   : 'bg-yellow-500 hover:bg-yellow-600'
                   }`}
@@ -1375,7 +1392,7 @@ const App: React.FC = () => {
         .animate-float { animation: float 6s ease-in-out infinite; }
         .custom-scrollbar::-webkit-scrollbar { width: 8px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
-        body { margin: 0; padding: 0; height: 100vh; overflow: hidden; background: #000; font-family: 'Noto Serif SC', serif; }
+        body { margin: 0; padding: 0; height: 100vh; overflow: hidden; background: #000; font-family: 'Be Vietnam Pro', 'Inter', 'Roboto', sans-serif; }
         .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
         
         /* 新增 shimmer 动画 */

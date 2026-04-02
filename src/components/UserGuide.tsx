@@ -181,10 +181,10 @@ const UserGuide: React.FC<UserGuideProps> = ({ onClose }) => {
               <BookOpen className="text-red-700" size={28} />
             </div>
             <div>
-              <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
+              <h2 className="text-2xl font-black text-slate-900 uppercase">
                 {currentLang === 'zh' ? '操作指引' : currentLang === 'vi' ? 'Hướng dẫn sử dụng' : 'User Guide'}
               </h2>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">
+              <p className="text-xs text-slate-400 font-bold uppercase mt-1">
                 Lottery System Documentation
               </p>
             </div>

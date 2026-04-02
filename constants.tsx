@@ -2,7 +2,7 @@
 import { Theme } from './types';
 
 export const THEME_STYLES: Record<Theme, string> = {
-  [Theme.CLASSIC]: 'bg-gradient-to-br from-red-800 to-red-600 text-yellow-400 font-serif',
+  [Theme.CLASSIC]: 'bg-gradient-to-br from-red-800 to-red-600 text-yellow-400 font-sans',
   [Theme.CYBER]: 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-cyan-400 font-mono',
   [Theme.CHINESE]: 'bg-[#f5efe6] text-[#8b4513] font-[Ma Shan Zheng]',
   [Theme.SPACE]: 'bg-gradient-to-br from-black via-blue-900 to-indigo-900 text-blue-200 font-sans'
