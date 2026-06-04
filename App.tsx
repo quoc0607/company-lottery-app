@@ -301,7 +301,20 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const state: LotteryState = { participants, prizes, winners, theme, currentPrizeId: selectedPrizeId, appTitle, companyLogo, drawMode, resetHistory, auditLog };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      if (e instanceof Error && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+        console.warn('LocalStorage quota exceeded! Clearing logs & history to recover space.');
+        // Try saving a compacted state (no history/logs)
+        const compactedState = { ...state, resetHistory: [], auditLog: [] };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(compactedState));
+        } catch (innerErr) {
+          console.error('Compact storage save also failed:', innerErr);
+        }
+      }
+    }
   }, [participants, prizes, winners, theme, selectedPrizeId, appTitle, companyLogo, drawMode, resetHistory, auditLog]);
 
   const eligiblePool = useMemo(() => {
@@ -317,7 +330,27 @@ const App: React.FC = () => {
     const toast = document.createElement('div');
     const borderClass = type === 'success' ? 'border-green-500' : type === 'warning' ? 'border-orange-500' : 'border-red-500';
     toast.className = `fixed top-24 right-8 z-[400] max-w-md w-full bg-white border-l-8 ${borderClass} rounded-2xl p-6 shadow-2xl animate-snap-in toast text-slate-800`;
-    toast.innerHTML = `<div class="flex items-start gap-4"><div class="font-black">${t(titleKey)}</div><div class="flex-1 text-xs text-slate-500">${t(messageKey, values)}</div></div>`;
+    
+    // Create hierarchy safely without innerHTML to prevent XSS
+    const wrapper = document.createElement('div');
+    wrapper.className = 'flex items-start gap-4';
+
+    const textWrapper = document.createElement('div');
+    textWrapper.className = 'flex-1';
+
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'font-black';
+    titleDiv.textContent = t(titleKey) as string;
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-xs text-slate-500 mt-1';
+    messageDiv.textContent = t(messageKey, values) as string;
+
+    textWrapper.appendChild(titleDiv);
+    textWrapper.appendChild(messageDiv);
+    wrapper.appendChild(textWrapper);
+    toast.appendChild(wrapper);
+
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 4000);
   }, [t]);
@@ -348,15 +381,41 @@ const App: React.FC = () => {
         try {
           if (mode === 'soft') {
             setWinners([]);
+            setAuditLog([]);
+            const newHistory: ResetRecord = {
+              id: `reset-${Date.now()}`,
+              mode: 'soft',
+              timestamp: new Date().toLocaleString(),
+              stats: {
+                participantsBefore: participants.length,
+                winnersBefore: winners.length,
+                prizesBefore: prizes.length
+              }
+            };
+            setResetHistory(prev => [newHistory, ...prev].slice(0, 5));
             setPrizes(prev => prev.map(p => ({ ...p, remain: p.total })));
           } else if (mode === 'hard') {
             setWinners([]);
             setParticipants([]);
+            setAuditLog([]);
+            const newHistory: ResetRecord = {
+              id: `reset-${Date.now()}`,
+              mode: 'hard',
+              timestamp: new Date().toLocaleString(),
+              stats: {
+                participantsBefore: participants.length,
+                winnersBefore: winners.length,
+                prizesBefore: prizes.length
+              }
+            };
+            setResetHistory(prev => [newHistory, ...prev].slice(0, 5));
             setPrizes(prev => prev.map(p => ({ ...p, remain: p.total })));
           } else {
             setWinners([]);
             setParticipants([]);
             setPrizes([]);
+            setAuditLog([]);
+            setResetHistory([]);
             setAppTitle(t('appTitle') || '2025 Company Annual Gala Lottery');
             setCompanyLogo(null);
             localStorage.removeItem(STORAGE_KEY);
@@ -410,7 +469,7 @@ const App: React.FC = () => {
     // ────────────── 部门配额计算（后台隐藏） ──────────────
     const deptAvailable = new Map<string, number>();
     eligiblePool.forEach(p => {
-      const dept = p.department || '未知部门';
+      const dept = (p.department || '未知部门').toLowerCase().trim();
       deptAvailable.set(dept, (deptAvailable.get(dept) || 0) + 1);
     });
 
@@ -432,7 +491,7 @@ const App: React.FC = () => {
       const possibleDepts = Array.from(deptTargetQuota.keys()).filter(dept => {
         const suggested = deptTargetQuota.get(dept) || 0;
         const alreadyWon = winners.filter(w =>
-          w.prizeId === prize.id && w.department === dept
+          w.prizeId === prize.id && (w.department || '未知部门').toLowerCase().trim() === dept
         ).length;
         return alreadyWon < suggested;
       });
@@ -451,21 +510,24 @@ const App: React.FC = () => {
     winners
       .filter(w => w.prizeId === prize.id)
       .forEach(w => {
-        const dept = w.department || '未知部门';
+        const dept = (w.department || '未知部门').toLowerCase().trim();
         deptWon.set(dept, (deptWon.get(dept) || 0) + 1);
       });
 
     while (batchWinners.length < targetBatchSize && currentPool.length > 0) {
       let availablePool = currentPool.filter(p => {
-        const dept = p.department || '未知部门';
+        const dept = (p.department || '未知部门').toLowerCase().trim();
         const target = (deptTargetQuota.get(dept) || 0) + 1; // 宽松
         const current = deptWon.get(dept) || 0;
         return current < target;
       });
 
       if (availablePool.length === 0) {
-        // console.warn(`[${prize.name}] 部门配额已满，使用全池继续`);
         availablePool = [...currentPool];
+      }
+
+      if (availablePool.length === 0) {
+        break;
       }
 
       const maxWeight = Math.max(...availablePool.map(p => p.weight || 1), 1);
@@ -484,8 +546,13 @@ const App: React.FC = () => {
         }
       }
 
-      if (!selected) {
+      if (!selected && availablePool.length > 0) {
         selected = availablePool[Math.floor(Math.random() * availablePool.length)];
+      }
+
+      if (!selected) {
+        console.warn(`[${prize.name}] No participant selected - availablePool is empty`);
+        break;
       }
 
       batchWinners.push({
@@ -501,7 +568,7 @@ const App: React.FC = () => {
       });
 
       // 更新部门计数
-      const dept = selected.department || '未知部门';
+      const dept = (selected.department || '未知部门').toLowerCase().trim();
       deptWon.set(dept, (deptWon.get(dept) || 0) + 1);
 
       const idx = currentPool.indexOf(selected);
@@ -521,7 +588,7 @@ const App: React.FC = () => {
 
     setWinners(prev => [...prev, ...batchWinners]);
     setPrizes(prev => prev.map(p =>
-      p.id === prize.id ? { ...p, remain: p.remain - batchWinners.length } : p
+      p.id === prize.id ? { ...p, remain: Math.max(0, p.remain - batchWinners.length) } : p
     ));
     setRollingParticipants(batchWinners.map(w => ({
       name: w.participantName,
@@ -531,7 +598,9 @@ const App: React.FC = () => {
     })));
     setIsDrawing(false);
 
-    confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } });
+    confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } }).catch(err => {
+      console.warn('Confetti animation failed:', err);
+    });
 
     showToast({
       type: 'success',
@@ -1304,10 +1373,22 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={() => {
+                  const winner = winners.find(w => w.id === removeWinnerInfo.id);
+                  if (!winner) {
+                    setShowRemoveConfirm(false);
+                    setRemoveWinnerInfo(null);
+                    showToast({
+                      type: 'warning',
+                      titleKey: 'warning',
+                      messageKey: 'Winner record not found'
+                    });
+                    return;
+                  }
+
                   setShowRemoveConfirm(false);
                   setRemoveWinnerInfo(null);
 
-                  // 执行删除逻辑（不变）
+                  // 执行删除逻辑
                   setWinners(prev => prev.filter(w => w.id !== removeWinnerInfo.id));
                   setPrizes(prev => prev.map(p =>
                     p.id === removeWinnerInfo.prizeId
@@ -1315,14 +1396,13 @@ const App: React.FC = () => {
                       : p
                   ));
 
-                  const winner = winners.find(w => w.id === removeWinnerInfo.id);
                   const newAudit: AuditRecord = {
                     id: `audit-${Date.now()}`,
                     timestamp: new Date().toLocaleString(),
                     winnerName: removeWinnerInfo.name,
-                    staffId: winner?.staffId || '',
+                    staffId: winner.staffId || '',
                     prizeName: removeWinnerInfo.prizeName,
-                    tier: winner?.tier || ''
+                    tier: winner.tier || ''
                   };
                   setAuditLog(prev => [newAudit, ...prev]);
 
