@@ -42,7 +42,7 @@ const DEFAULT_AUDIO_OPTIONS = {
 interface LotteryDisplayCardProps {
   participant: Partial<Participant>;
   isWinner?: boolean;
-  size?: 'xsmall' | 'small' | 'medium' | 'large';
+  size?: 'xsmall' | 'small' | 'medium-small' | 'medium' | 'large';
   prizeImage?: string;
 }
 
@@ -163,6 +163,54 @@ const LotteryDisplayCard = memo<LotteryDisplayCardProps>(({
 
 
 
+const compressImage = (base64Str: string, maxWidth = 300, maxHeight = 300, quality = 0.75): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth || height > maxHeight) {
+        if (width > height) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        } else {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } else {
+        resolve(base64Str);
+      }
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+  });
+};
+
+const isTopPrizeTier = (tier: string | undefined): boolean => {
+  if (!tier) return false;
+  const tNorm = tier.toLowerCase().trim();
+  const scTop = ['特别奖', '特等奖', '一等奖', '特别', '特等', '一等'];
+  const enTop = ['grand', 'top', 'first', 'special', 'gold', 'diamond', 'platinum', 'champion', '1st'];
+  const viTop = ['đặc biệt', 'nhất', 'vàng', 'kim cương', 'bạch kim', 'vô địch'];
+  
+  if (scTop.some(k => tNorm.includes(k))) return true;
+  if (enTop.some(k => tNorm.includes(k))) return true;
+  if (viTop.some(k => tNorm.includes(k))) return true;
+  return false;
+};
+
 const App: React.FC = () => {
   const { t, i18n } = useTranslation();
   const changeLanguage = (lng: string) => i18n.changeLanguage(lng);
@@ -215,6 +263,7 @@ const App: React.FC = () => {
     message: string;
     onConfirm: () => void;
     danger?: boolean;
+    actionKey?: string;
   } | null>(null);
 
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
@@ -244,15 +293,16 @@ const App: React.FC = () => {
   }, []);
 
   const [audioState, setAudioState] = useState({
-    bg: { index: 0, customUrl: null as string | null },
-    draw: { index: 0, customUrl: null as string | null },
-    winner: { index: 0, customUrl: null as string | null }
+    bg: { index: 0, customUrl: null as string | null, customName: null as string | null },
+    draw: { index: 0, customUrl: null as string | null, customName: null as string | null },
+    winner: { index: 0, customUrl: null as string | null, customName: null as string | null }
   });
 
   const drawIntervalRef = useRef<number | null>(null);
   const drawingAudioRef = useRef<HTMLAudioElement | null>(null);
   const winnerAudioRef = useRef<HTMLAudioElement | null>(null);
   const bgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const testAudioRef = useRef<HTMLAudioElement | null>(null);
   const appRootRef = useRef<HTMLDivElement>(null);
   const winnersRef = useRef<HTMLDivElement>(null);
 
@@ -262,16 +312,21 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(savedAudio);
         setAudioState(prev => ({
-          bg: { ...prev.bg, ...parsed.bg },
-          draw: { ...prev.draw, ...parsed.draw },
-          winner: { ...prev.winner, ...parsed.winner }
+          bg: { ...prev.bg, index: parsed.bg?.index ?? 0, customName: parsed.bg?.customName || null, customUrl: null },
+          draw: { ...prev.draw, index: parsed.draw?.index ?? 0, customName: parsed.draw?.customName || null, customUrl: null },
+          winner: { ...prev.winner, index: parsed.winner?.index ?? 0, customName: parsed.winner?.customName || null, customUrl: null }
         }));
       } catch (e) { }
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(audioState));
+    const cleaned = {
+      bg: { index: audioState.bg.index, customName: audioState.bg.customName },
+      draw: { index: audioState.draw.index, customName: audioState.draw.customName },
+      winner: { index: audioState.winner.index, customName: audioState.winner.customName }
+    };
+    localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(cleaned));
   }, [audioState]);
 
   useEffect(() => {
@@ -280,7 +335,7 @@ const App: React.FC = () => {
       bgAudioRef.current = null;
     }
     const { index, customUrl } = audioState.bg;
-    const url = customUrl || DEFAULT_AUDIO_OPTIONS.background[index]?.url;
+    const url = (index === -1 ? customUrl : null) || DEFAULT_AUDIO_OPTIONS.background[index === -1 ? 1 : index]?.url;
     if (!url || isMuted) return;
     bgAudioRef.current = new Audio(url);
     bgAudioRef.current.loop = true;
@@ -432,7 +487,7 @@ const App: React.FC = () => {
           showToast({
             type: 'error',
             titleKey: 'error',
-            messageKey: '重置失败，请检查控制台'
+            messageKey: 'resetFailed'
           });
         } finally {
           setIsResetting(false);
@@ -578,11 +633,22 @@ const App: React.FC = () => {
     // ────────────── 后续处理 ──────────────
     if (!isMuted) {
       const { index, customUrl } = audioState.winner;
-      const url = customUrl || DEFAULT_AUDIO_OPTIONS.winner[index]?.url;
+      const url = (index === -1 ? customUrl : null) || DEFAULT_AUDIO_OPTIONS.winner[index === -1 ? 0 : index]?.url;
       if (url) {
+        if (winnerAudioRef.current) {
+          winnerAudioRef.current.pause();
+          winnerAudioRef.current.currentTime = 0;
+          winnerAudioRef.current = null;
+        }
         const a = new Audio(url);
+        winnerAudioRef.current = a;
         a.volume = 1.0;
         a.play().catch(() => { });
+        a.onended = () => {
+          if (winnerAudioRef.current === a) {
+            winnerAudioRef.current = null;
+          }
+        };
       }
     }
 
@@ -618,7 +684,7 @@ const App: React.FC = () => {
     setIsDrawing(true);
     if (!isMuted) {
       const { index, customUrl } = audioState.draw;
-      const url = customUrl || DEFAULT_AUDIO_OPTIONS.drawing[index]?.url;
+      const url = (index === -1 ? customUrl : null) || DEFAULT_AUDIO_OPTIONS.drawing[index === -1 ? 0 : index]?.url;
       if (url) { drawingAudioRef.current = new Audio(url); drawingAudioRef.current.loop = true; drawingAudioRef.current.play().catch(() => { }); }
     }
 
@@ -688,16 +754,44 @@ const App: React.FC = () => {
           };
         }).filter(p => p.name && p.staffId);
 
-        setParticipants(imported);
+        // Merge instead of overwriting directly, avoiding loss of previous data
+        setParticipants(prev => {
+          const merged = [...prev];
+          imported.forEach(newP => {
+            const index = merged.findIndex(p => p.staffId.toLowerCase().trim() === newP.staffId.toLowerCase().trim());
+            if (index !== -1) {
+              merged[index] = {
+                ...merged[index],
+                name: newP.name,
+                department: newP.department,
+                pool: newP.pool,
+                weight: newP.weight
+              };
+            } else {
+              merged.push(newP);
+            }
+          });
+          return merged;
+        });
 
-        // 打印分布（非常重要！）
+        // 打印分布
         const poolStats = imported.reduce((acc, p) => {
           acc[p.pool] = (acc[p.pool] || 0) + 1;
           return acc;
         }, {} as Record<string, number>);
         console.log('员工奖池分布：', poolStats);
 
-        showToast({ type: 'success', titleKey: 'success', messageKey: 'importedParticipants', values: { count: imported.length } });
+        showToast({
+          type: 'success',
+          titleKey: 'success',
+          messageKey: 'importedParticipants',
+          values: {
+            count: imported.length,
+            elite: imported.filter(p => p.pool === 'elite').length,
+            skipped: data.length - imported.length,
+            total: data.length
+          }
+        });
       } catch (err) {
         console.error(err);
         showToast({ type: 'error', titleKey: 'error', messageKey: 'importFailed' });
@@ -749,13 +843,50 @@ const App: React.FC = () => {
           };
         }).filter(p => p.name && p.total > 0);
 
-        setPrizes(imported);
+        // Merge instead of overwriting directly, preserving existing records and relations
+        setPrizes(prev => {
+          const merged = [...prev];
+          imported.forEach(newPrize => {
+            const index = merged.findIndex(p => 
+              p.tier.toLowerCase().trim() === newPrize.tier.toLowerCase().trim() &&
+              p.name.toLowerCase().trim() === newPrize.name.toLowerCase().trim()
+            );
+            if (index !== -1) {
+              const original = merged[index];
+              const totalDiff = newPrize.total - original.total;
+              merged[index] = {
+                ...original,
+                total: newPrize.total,
+                remain: Math.max(0, original.remain + totalDiff),
+                pool: newPrize.pool
+              };
+            } else {
+              merged.push(newPrize);
+            }
+          });
+          return merged;
+        });
 
         console.log('奖项奖池分布：', imported.map(p => `${p.tier} - ${p.name} → ${p.pool}`));
 
-        if (imported.length > 0) setSelectedPrizeId(imported[0].id);
+        setSelectedPrizeId(prev => {
+          if (prev) {
+            // If previous selected prize is still in the prizes array, preserve it
+            return prev;
+          }
+          return imported.length > 0 ? imported[0].id : null;
+        });
 
-        showToast({ type: 'success', titleKey: 'success', messageKey: 'importedAwards', values: { count: imported.length } });
+        showToast({
+          type: 'success',
+          titleKey: 'success',
+          messageKey: 'importedAwards',
+          values: {
+            count: imported.length,
+            elite: imported.filter(p => p.pool === 'elite').length,
+            skipped: data.length - imported.length
+          }
+        });
       } catch (err) {
         console.error(err);
         showToast({ type: 'error', titleKey: 'error', messageKey: 'importFailed' });
@@ -767,99 +898,84 @@ const App: React.FC = () => {
 
   // Fix: Implemented missing handleAudioUpload function to support custom sound effects
   const handleAudioUpload = useCallback((key: 'bg' | 'draw' | 'winner', file: File) => {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const url = evt.target?.result as string;
+    try {
+      if (audioState[key].customUrl && audioState[key].customUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(audioState[key].customUrl);
+      }
+      const blobUrl = URL.createObjectURL(file);
       setAudioState(prev => ({
         ...prev,
-        [key]: { ...prev[key], customUrl: url }
+        [key]: { ...prev[key], customUrl: blobUrl, customName: file.name, index: -1 }
       }));
       showToast({ type: 'success', titleKey: 'success', messageKey: 'importSuccess' });
-    };
-    reader.readAsDataURL(file);
-  }, [showToast]);
+    } catch (err) {
+      console.error('Upload audio failed:', err);
+      showToast({ type: 'error', titleKey: 'error', messageKey: 'importFailed' });
+    }
+  }, [audioState, showToast]);
 
   const captureFullApp = useCallback(async () => {
+    const configModal = document.querySelector('.fixed.inset-0.z-\\[150\\]') as HTMLElement | null;
+    let winnersOriginalOverflowY = '';
+    let winnersOriginalHeight = '';
+    const hasWinners = winnersRef.current && winners.length > 0;
+
     try {
-      showToast({ type: 'info', titleKey: 'processing', messageKey: '正在生成完整截图（包含所有中奖记录）...' });
+      showToast({ type: 'info', titleKey: 'info', messageKey: 'capturingFullApp' });
 
       // 1. 临时隐藏配置面板（如果打开）
-      const configModal = document.querySelector('.fixed.inset-0.z-\\[150\\]');
-      if (configModal) (configModal as HTMLElement).style.display = 'none';
+      if (configModal) configModal.style.display = 'none';
 
       // 等待渲染稳定
       await new Promise(r => setTimeout(r, 300));
 
       // 2. 先截取荣耀墙完整内容（强制计算其 scrollHeight）
-      if (winnersRef.current && winners.length > 0) {
+      if (hasWinners && winnersRef.current) {
         // 临时移除 overflow 限制，让 html2canvas 捕获全部高度
-        const originalStyle = winnersRef.current.style.overflowY;
-        const originalHeight = winnersRef.current.style.height;
+        winnersOriginalOverflowY = winnersRef.current.style.overflowY;
+        winnersOriginalHeight = winnersRef.current.style.height;
         winnersRef.current.style.overflowY = 'visible';
         winnersRef.current.style.height = 'auto';
-
-        // 3. 截取整个 body（不含荣耀墙滚动部分会被完整捕获）
-        const fullBodyCanvas = await html2canvas(document.body, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: null,
-          logging: false,
-          windowWidth: document.documentElement.scrollWidth,
-          windowHeight: document.documentElement.scrollHeight,
-          x: 0,
-          y: 0,
-          scrollX: 0,
-          scrollY: 0
-        });
-
-        // 恢复原样式
-        winnersRef.current.style.overflowY = originalStyle;
-        winnersRef.current.style.height = originalHeight;
-
-        // 恢复配置面板
-        if (configModal) (configModal as HTMLElement).style.display = '';
-
-        // 下载 body 完整截图（已包含所有可见 + 滚动内容高度调整后通常完整）
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '');
-        link.download = `${appTitle}_完整截图_${timestamp}.png`;
-        link.href = fullBodyCanvas.toDataURL('image/png');
-        link.click();
-      } else {
-        // 如果没有中奖记录，直接截取当前 body
-        const fullBodyCanvas = await html2canvas(document.body, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: null,
-          logging: false,
-          windowWidth: document.documentElement.scrollWidth,
-          windowHeight: document.documentElement.scrollHeight,
-          x: 0,
-          y: 0,
-          scrollX: 0,
-          scrollY: 0
-        });
-
-        // 恢复配置面板
-        if (configModal) (configModal as HTMLElement).style.display = '';
-
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '');
-        link.download = `${appTitle}_完整截图_${timestamp}.png`;
-        link.href = fullBodyCanvas.toDataURL('image/png');
-        link.click();
       }
+
+      // 3. 截取整个 body
+      const fullBodyCanvas = await html2canvas(document.body, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: null,
+        logging: false,
+        windowWidth: document.documentElement.scrollWidth,
+        windowHeight: document.documentElement.scrollHeight,
+        x: 0,
+        y: 0,
+        scrollX: 0,
+        scrollY: 0
+      });
+
+      // 下载 body 完整截图
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '');
+      link.download = `${appTitle}_完整截图_${timestamp}.png`;
+      link.href = fullBodyCanvas.toDataURL('image/png');
+      link.click();
 
       showToast({
         type: 'success',
         titleKey: 'success',
-        messageKey: '完整界面已截图并下载（包含所有中奖记录）'
+        messageKey: 'screenshotSaved'
       });
     } catch (err) {
       console.error('截图失败:', err);
-      showToast({ type: 'error', titleKey: 'error', messageKey: '截图失败，请检查控制台或重试' });
+      showToast({ type: 'error', titleKey: 'error', messageKey: 'captureFailed' });
+    } finally {
+      // 恢复荣耀墙原样式
+      if (hasWinners && winnersRef.current) {
+        winnersRef.current.style.overflowY = winnersOriginalOverflowY;
+        winnersRef.current.style.height = winnersOriginalHeight;
+      }
+      // 恢复配置面板
+      if (configModal) configModal.style.display = '';
     }
   }, [appTitle, showToast, winners.length]);
 
@@ -1051,7 +1167,7 @@ const App: React.FC = () => {
                     <div className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-full text-[10px] font-bold">
                       <button onClick={(e) => { e.stopPropagation(); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.max(1, x.batchSize - 1) } : x)); }} className="text-white/80 hover:text-white">-</button>
                       <span>{p.batchSize || 1}</span>
-                      <button onClick={(e) => { e.stopPropagation(); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: (x.batchSize || 1) + 1 } : x)); }} className="text-white/80 hover:text-white">+</button>
+                      <button onClick={(e) => { e.stopPropagation(); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.min(x.total, (x.batchSize || 1) + 1) } : x)); }} className="text-white/80 hover:text-white">+</button>
                     </div>
                   </div>
                 ))}
@@ -1070,13 +1186,13 @@ const App: React.FC = () => {
               ) : (
                 <div className="space-y-10">
                   {/* 高级奖项 - 单列 */}
-                  {winners.some(w => ['特别奖', '特等奖', '一等奖'].includes(w.tier)) && (
+                  {winners.some(w => isTopPrizeTier(w.tier)) && (
                     <div className="mb-8 border-b border-white/5 pb-8">
                       <h3 className="text-xl font-black text-yellow-400 mb-6 uppercase flex items-center gap-3">
                         <Star size={24} /> {t('topPrizes')}
                       </h3>
                       <div className="grid grid-cols-1 gap-6">
-                        {winners.filter(w => ['特别奖', '特等奖', '一等奖'].includes(w.tier)).map(w => (
+                        {winners.filter(w => isTopPrizeTier(w.tier)).map(w => (
                           <div
                             key={w.id}
                             className="relative p-6 rounded-3xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-600 text-black border-4 border-yellow-200 shadow-2xl animate-snap-in hover:scale-[1.02] transition-transform"
@@ -1110,7 +1226,7 @@ const App: React.FC = () => {
 
                   {/* 其他奖项 - 单列 */}
                   <div className="grid grid-cols-1 gap-5 pb-8">
-                    {winners.filter(w => !['特别奖', '特等奖', '一等奖'].includes(w.tier)).slice().reverse().map((w, idx) => (
+                    {winners.filter(w => !isTopPrizeTier(w.tier)).slice().reverse().map((w, idx) => (
                       <div
                         key={w.id}
                         className={`
@@ -1181,7 +1297,7 @@ const App: React.FC = () => {
                   <div className="space-y-3"><label className="text-[11px] font-black text-slate-400 uppercase">{t('eventMainTitle')}</label><input type="text" value={appTitle} onChange={(e) => setAppTitle(e.target.value.normalize('NFC'))} className="w-full bg-slate-50 border-4 border-slate-50 rounded-3xl px-8 py-5 font-black text-xl italic focus:border-blue-500 outline-none" /></div>
                   <div className="h-32 bg-slate-50 border-4 border-dashed border-slate-100 rounded-3xl flex items-center justify-center relative group overflow-hidden">
                     {companyLogo ? <><img src={companyLogo} className="h-full object-contain p-4" /><div className="absolute inset-0 bg-black/80 text-white flex items-center justify-center font-black cursor-pointer opacity-0 group-hover:opacity-100" onClick={() => setCompanyLogo(null)}>{t('removeAsset')}</div></> : <div className="flex flex-col items-center opacity-40"><Upload size={40} className="mb-2" /><span className="text-[11px] font-black uppercase">{t('uploadBrandLogo')}</span></div>}
-                    <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = () => setCompanyLogo(r.result as string); r.readAsDataURL(f); } }} />
+                    <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = async () => { const compressed = await compressImage(r.result as string, 300, 300, 0.75); setCompanyLogo(compressed); }; r.readAsDataURL(f); } }} />
                   </div>
                 </section>
                 <section className="space-y-8">
@@ -1190,11 +1306,18 @@ const App: React.FC = () => {
                     <div key={key} className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
                       <label className="text-xs font-black text-slate-500 uppercase flex items-center gap-2 mb-3"><Music size={14} />{t(`${key}Music`)}</label>
                       <div className="flex items-center gap-4">
-                        <select value={audioState[key].index} onChange={(e) => setAudioState(prev => ({ ...prev, [key]: { ...prev[key], index: Number(e.target.value), customUrl: null } }))} className="flex-1 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-indigo-500">
+                        <select
+                          value={audioState[key].index}
+                          onChange={(e) => setAudioState(prev => ({ ...prev, [key]: { ...prev[key], index: Number(e.target.value), customUrl: null, customName: null } }))}
+                          className="flex-1 p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:border-indigo-500"
+                        >
+                          {audioState[key].index === -1 && (
+                            <option value={-1}>🎵 {audioState[key].customName || 'Custom Audio'}</option>
+                          )}
                           {DEFAULT_AUDIO_OPTIONS[key === 'bg' ? 'background' : key === 'draw' ? 'drawing' : 'winner'].map((opt, i) => (<option key={i} value={i}>{opt.name}</option>))}
                         </select>
                         <div className="relative group"><button className="p-4 bg-indigo-600 text-white rounded-2xl"><Upload size={18} /></button><input type="file" accept="audio/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => e.target.files?.[0] && handleAudioUpload(key, e.target.files[0])} /></div>
-                        <button onClick={() => { const url = audioState[key].customUrl || DEFAULT_AUDIO_OPTIONS[key === 'bg' ? 'background' : key === 'draw' ? 'drawing' : 'winner'][audioState[key].index].url; if (url) { const a = new Audio(url); a.volume = 0.5; a.play(); setTimeout(() => { a.pause(); a.currentTime = 0; }, 4000); } }} className="p-4 bg-slate-200 text-slate-600 rounded-2xl"><Play size={18} /></button>
+                        <button onClick={() => { const url = (audioState[key].index === -1 ? audioState[key].customUrl : null) || DEFAULT_AUDIO_OPTIONS[key === 'bg' ? 'background' : key === 'draw' ? 'drawing' : 'winner'][audioState[key].index === -1 ? 1 : audioState[key].index]?.url; if (url) { if (testAudioRef.current) { testAudioRef.current.pause(); testAudioRef.current.currentTime = 0; testAudioRef.current = null; } const a = new Audio(url); testAudioRef.current = a; a.volume = 0.5; a.play().catch(() => {}); setTimeout(() => { if (testAudioRef.current === a) { a.pause(); a.currentTime = 0; testAudioRef.current = null; } }, 4000); } }} className="p-4 bg-slate-200 text-slate-600 rounded-2xl"><Play size={18} /></button>
                       </div>
                     </div>
                   ))}
@@ -1292,7 +1415,7 @@ const App: React.FC = () => {
                     <div key={p.id} className="bg-white p-8 rounded-[3.5rem] border border-slate-100 shadow-sm flex items-center gap-8 group">
                       <div className="relative w-32 h-32 bg-slate-100 rounded-[2.5rem] flex items-center justify-center overflow-hidden border-4 border-slate-200 group-hover:border-indigo-400 transition-all cursor-pointer">
                         {p.image ? <img src={p.image} className="w-full h-full object-cover" /> : <div className="text-slate-300 text-center flex flex-col items-center"><Camera size={44} /><div className="text-[10px] mt-1 font-black">{t('clickToUpload')}</div></div>}
-                        <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = () => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, image: r.result as string } : x)); r.readAsDataURL(f); } }} />
+                        <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onload = async () => { const compressed = await compressImage(r.result as string, 300, 300, 0.75); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, image: compressed } : x)); }; r.readAsDataURL(f); } }} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-black text-blue-500 uppercase italic">{p.tier}</div>
@@ -1303,7 +1426,7 @@ const App: React.FC = () => {
                         <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-[2rem] border border-slate-100 shadow-inner">
                           <button onClick={() => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.max(1, x.batchSize - 1) } : x))} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"><Minus size={18} /></button>
                           <span className="text-2xl font-black w-10 text-center">{p.batchSize}</span>
-                          <button onClick={() => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: x.batchSize + 1 } : x))} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"><Plus size={18} /></button>
+                          <button onClick={() => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.min(x.total, x.batchSize + 1) } : x))} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"><Plus size={18} /></button>
                         </div>
                         <div className="text-[10px] font-black text-slate-400 uppercase italic">{t('batchSizeLabel')}</div>
                       </div>
@@ -1380,7 +1503,7 @@ const App: React.FC = () => {
                     showToast({
                       type: 'warning',
                       titleKey: 'warning',
-                      messageKey: 'Winner record not found'
+                      messageKey: 'winnerNotFound'
                     });
                     return;
                   }
