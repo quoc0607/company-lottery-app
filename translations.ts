@@ -258,7 +258,7 @@ export const resources = {
       dataLossWarning: "Cảnh báo mất dữ liệu",
       resetSoftContent: "Sẽ xóa toàn bộ kết quả trúng thưởng, giữ nguyên danh sách và kho giải.",
       resetHardContent: "Đặt lại kết quả trúng thưởng và số lượng giải, nên sao lưu trước.",
-      resetFactoryContent: "⚠️ Chế độ xóa hoàn toàn ⚠️\nXóa vĩnh viễn TOÀO BỘ dữ liệu.",
+      resetFactoryContent: "⚠️ Chế độ xóa hoàn toàn ⚠️\nXóa vĩnh viễn TOÀN BỘ dữ liệu.",
       eraseConfirm: "Xóa vĩnh viễn",
       resetSuccess: "Đặt lại hoàn tất",
       systemResetComplete: "Trạng thái hệ thống đã được cập nhật.",

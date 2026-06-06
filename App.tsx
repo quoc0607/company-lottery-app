@@ -383,7 +383,10 @@ const App: React.FC = () => {
 
   const showToast = useCallback(({ type, titleKey, messageKey, values = {} }: any) => {
     const toast = document.createElement('div');
-    const borderClass = type === 'success' ? 'border-green-500' : type === 'warning' ? 'border-orange-500' : 'border-red-500';
+    const borderClass = type === 'success' ? 'border-green-500' 
+      : type === 'warning' ? 'border-orange-500' 
+      : type === 'info' ? 'border-blue-500' 
+      : 'border-red-500';
     toast.className = `fixed top-24 right-8 z-[400] max-w-md w-full bg-white border-l-8 ${borderClass} rounded-2xl p-6 shadow-2xl animate-snap-in toast text-slate-800`;
     
     // Create hierarchy safely without innerHTML to prevent XSS
@@ -496,7 +499,7 @@ const App: React.FC = () => {
       mode === 'factory',                           // danger: true → 红色按钮
       mode !== 'factory' ? 'confirmExecute' : 'eraseConfirm'  // ← 这里加的第五个参数
     );
-  }, [t, showToast, showCustomConfirm]);
+  }, [t, showToast, showCustomConfirm, participants, winners, prizes]);
 
   const stopDraw = useCallback(() => {
     if (drawIntervalRef.current) clearInterval(drawIntervalRef.current);
@@ -619,7 +622,7 @@ const App: React.FC = () => {
         prizeId: prize.id,
         prizeName: prize.name,
         tier: prize.tier,
-        time: new Date().toLocaleTimeString()
+        time: new Date().toLocaleString()
       });
 
       // 更新部门计数
@@ -676,6 +679,11 @@ const App: React.FC = () => {
     });
   }, [eligiblePool, selectedPrizeId, prizes, winners, isMuted, audioState.winner, showToast]);
 
+  const stopDrawRef = useRef(stopDraw);
+  useEffect(() => {
+    stopDrawRef.current = stopDraw;
+  }, [stopDraw]);
+
   const startDraw = useCallback(() => {
     if (!selectedPrizeId || isDrawing || eligiblePool.length === 0) return;
     const prize = prizes.find(p => p.id === selectedPrizeId);
@@ -696,9 +704,9 @@ const App: React.FC = () => {
         return { name: p.name, staffId: p.staffId, department: p.department, id: p.id };
       });
       setRollingParticipants(randoms);
-      if (drawMode === 'auto' && count++ > 30) stopDraw();
+      if (drawMode === 'auto' && count++ > 30) stopDrawRef.current();
     }, 70);
-  }, [selectedPrizeId, isDrawing, eligiblePool, prizes, drawMode, isMuted, audioState.draw, stopDraw, showToast]);
+  }, [selectedPrizeId, isDrawing, eligiblePool, prizes, drawMode, isMuted, audioState.draw, showToast]);
 
   const handleEmployeeImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1019,7 +1027,7 @@ const App: React.FC = () => {
       return (
         <div className="flex flex-col items-center w-full relative">
           <button onClick={() => setRollingParticipants([])} className="absolute top-6 right-6 z-30 bg-red-600/80 hover:bg-red-700 text-white rounded-full p-3 shadow-lg transition-all transform hover:scale-110"><X size={28} /></button>
-          <h2 className="text-5xl md:text-7xl font-black text-yellow-400 mb-12 animate-bounce flex items-center gap-4 italic drop-shadow-xl">🎉 {t('justWon')} 🎉</h2>
+          <h2 className="text-5xl md:text-7xl font-black text-yellow-400 mb-12 animate-bounce flex items-center gap-4 italic drop-shadow-xl">{t('justWon')}</h2>
           <div className="grid gap-12 w-full max-w-7xl mx-auto overflow-y-auto max-h-[600px] custom-scrollbar p-6">
             {rollingParticipants.map((p, i) => (
               <LotteryDisplayCard key={i} participant={p} isWinner={true} size={
@@ -1167,7 +1175,7 @@ const App: React.FC = () => {
                     <div className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-full text-[10px] font-bold">
                       <button onClick={(e) => { e.stopPropagation(); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.max(1, x.batchSize - 1) } : x)); }} className="text-white/80 hover:text-white">-</button>
                       <span>{p.batchSize || 1}</span>
-                      <button onClick={(e) => { e.stopPropagation(); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.min(x.total, (x.batchSize || 1) + 1) } : x)); }} className="text-white/80 hover:text-white">+</button>
+                      <button onClick={(e) => { e.stopPropagation(); setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.min(Math.max(1, x.remain), (x.batchSize || 1) + 1) } : x)); }} className="text-white/80 hover:text-white">+</button>
                     </div>
                   </div>
                 ))}
@@ -1426,7 +1434,7 @@ const App: React.FC = () => {
                         <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-[2rem] border border-slate-100 shadow-inner">
                           <button onClick={() => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.max(1, x.batchSize - 1) } : x))} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"><Minus size={18} /></button>
                           <span className="text-2xl font-black w-10 text-center">{p.batchSize}</span>
-                          <button onClick={() => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.min(x.total, x.batchSize + 1) } : x))} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"><Plus size={18} /></button>
+                          <button onClick={() => setPrizes(prev => prev.map(x => x.id === p.id ? { ...x, batchSize: Math.min(Math.max(1, x.remain), x.batchSize + 1) } : x))} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"><Plus size={18} /></button>
                         </div>
                         <div className="text-[10px] font-black text-slate-400 uppercase italic">{t('batchSizeLabel')}</div>
                       </div>
@@ -1518,6 +1526,7 @@ const App: React.FC = () => {
                       ? { ...p, remain: Math.min(p.total, p.remain + 1) }
                       : p
                   ));
+                  setRollingParticipants(prev => prev.filter(rp => rp.id !== winner.participantId));
 
                   const newAudit: AuditRecord = {
                     id: `audit-${Date.now()}`,
