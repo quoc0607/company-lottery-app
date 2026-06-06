@@ -58,6 +58,9 @@ export const resources = {
       error: "错误",
       importFailed: "导入失败",
       noEligibleParticipants: "没有符合条件的参与者",
+      noEligibleParticipantsDesc: "该奖池中已没有符合抽奖条件的员工（可能已全部中奖）！",
+      noEligibleParticipantsHint: "请在系统控制台中检查该奖池（全员/精英）的员工名单，或者从 Excel 导入更多新员工。",
+      audioIDBWarning: "音频仅在此会话生效（由于沙盒限制，IndexedDB 存储失败）！",
       winnerNotFound: "中奖记录未找到",
       resetFailed: "重置失败，请检查控制台",
       name: "姓名",
@@ -108,7 +111,14 @@ export const resources = {
       importStrategy: "数据导入模式",
       importStrategyMerge: "合并新数据",
       importStrategyOverwrite: "覆盖旧数据 (全新安装)",
-      storageQuotaExceededWarning: "浏览器存储空间已满（图片过大）。请压缩奖品图片或 Logo 以免数据丢失。"
+      storageQuotaExceededWarning: "浏览器存储空间已满（图片过大）。请压缩奖品图片或 Logo 以免数据丢失。",
+      auditTrailTitle: "中奖清除审计日志",
+      removedLabel: "已删除 & 回滚库存",
+      auditLogEntry: "移除了中奖者 {{name}} (工号: {{staffId}})，其获得的奖项为 {{prizeName}} ({{tier}})",
+      confirmClearEmployeesTitle: "清空员工名单？",
+      confirmClearEmployeesMessage: "确定要永久删除所有员工名单吗？这将清空员工数据库，已中奖记录不受影响。",
+      clearEmployeeList: "清空员工名单",
+      employeesCleared: "员工名单已清空"
     }
   },
   en: {
@@ -170,6 +180,9 @@ export const resources = {
       error: "Error",
       importFailed: "Import failed",
       noEligibleParticipants: "No eligible participants available",
+      noEligibleParticipantsDesc: "No eligible participants remain in this pool to be drawn (they may have already won an award)!",
+      noEligibleParticipantsHint: "Please check the employee list for this pool (General/Elite) in the system console, or import more employees from Excel.",
+      audioIDBWarning: "Audio loaded temporarily for this session (IndexedDB writes are restricted in this sandbox!)",
       winnerNotFound: "Winner record not found",
       resetFailed: "Reset failed, please check the console",
       name: "Name",
@@ -220,7 +233,14 @@ export const resources = {
       importStrategy: "Data Import Mode",
       importStrategyMerge: "Merge & Update",
       importStrategyOverwrite: "Overwrite (Clean Install)",
-      storageQuotaExceededWarning: "Browser storage is full (images too large). Please compress prize images/logos to prevent loss."
+      storageQuotaExceededWarning: "Browser storage is full (images too large). Please compress prize images/logos to prevent loss.",
+      auditTrailTitle: "Removal Audit Trail",
+      removedLabel: "REMOVED & ROLLEDBACK",
+      auditLogEntry: "Removed winner {{name}} (ID: {{staffId}}) from {{prizeName}} ({{tier}})",
+      confirmClearEmployeesTitle: "Clear Employee List?",
+      confirmClearEmployeesMessage: "Are you sure you want to permanently clear the employee list? This will empty the database; active prize winner records are retained.",
+      clearEmployeeList: "Clear Employee List",
+      employeesCleared: "Employee list has been successfully cleared"
     }
   },
   vi: {
@@ -282,6 +302,9 @@ export const resources = {
       error: "Lỗi",
       importFailed: "Nhập thất bại",
       noEligibleParticipants: "Không có người tham gia nào đủ điều kiện",
+      noEligibleParticipantsDesc: "Không còn nhân viên nào hợp lệ trong nhóm này để bốc thăm (có thể họ đã trúng giải khác)!",
+      noEligibleParticipantsHint: "Vui lòng kiểm tra lại danh sách nhân viên thuộc nhóm này (Tất cả/Elite) trong bảng điều khiển, hoặc nhập thêm nhân viên mới từ Excel.",
+      audioIDBWarning: "Âm thanh tải tạm thời trong phiên này (Trình duyệt/Sandbox chặn ghi âm IndexedDB)!",
       winnerNotFound: "Không tìm thấy hồ sơ người trúng thưởng",
       resetFailed: "Đặt lại thất bại, vui lòng kiểm tra bảng điều khiển",
       name: "Tên",
@@ -332,7 +355,14 @@ export const resources = {
       importStrategy: "Chế độ nhập dữ liệu",
       importStrategyMerge: "Hợp nhất & Cập nhật",
       importStrategyOverwrite: "Xóa cũ & Ghi đè",
-      storageQuotaExceededWarning: "Bộ bộ lưu trữ trình duyệt (LocalStorage) bị đầy do ảnh quá lớn. Hãy nén bớt hình ảnh của giải thưởng để tránh mất dữ liệu."
+      storageQuotaExceededWarning: "Bộ bộ lưu trữ trình duyệt (LocalStorage) bị đầy do ảnh quá lớn. Hãy nén bớt hình ảnh của giải thưởng để tránh mất dữ liệu.",
+      auditTrailTitle: "Nhật ký xóa trúng thưởng (Audit Log)",
+      removedLabel: "ĐÃ XÓA & KHÔI PHỤC KHO",
+      auditLogEntry: "Đã xóa người trúng {{name}} (Mã NV: {{staffId}}) khỏi giải {{prizeName}} ({{tier}})",
+      confirmClearEmployeesTitle: "Xóa danh sách nhân viên?",
+      confirmClearEmployeesMessage: "Bạn có chắc chắn muốn xóa toàn bộ danh sách nhân viên hiện tại không? Hành động này sẽ dọn sạch dữ liệu nhân viên, hồ sơ người trúng giải vẫn được giữ nguyên.",
+      clearEmployeeList: "Xóa danh sách nhân viên",
+      employeesCleared: "Đã xóa sạch danh sách nhân viên thành công"
     }
   }
 } as const;

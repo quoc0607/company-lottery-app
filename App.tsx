@@ -291,9 +291,21 @@ const App: React.FC = () => {
 
   const saved = useMemo(() => getInitialState(), [getInitialState]);
 
-  const [participants, setParticipants] = useState<Participant[]>(saved.participants || []);
+  const [participants, setParticipants] = useState<Participant[]>(() => {
+    const raw = saved.participants || [];
+    return raw.map((p: any) => ({
+      ...p,
+      staffId: p.staffId ? String(p.staffId).trim().replace(/^0+/, '') || '0' : ''
+    }));
+  });
   const [prizes, setPrizes] = useState<Prize[]>(saved.prizes || []);
-  const [winners, setWinners] = useState<Winner[]>(saved.winners || []);
+  const [winners, setWinners] = useState<Winner[]>(() => {
+    const raw = saved.winners || [];
+    return raw.map((w: any) => ({
+      ...w,
+      staffId: w.staffId ? String(w.staffId).trim().replace(/^0+/, '') || '0' : ''
+    }));
+  });
   const [theme, setTheme] = useState<Theme>(saved.theme || Theme.CLASSIC);
   const [appTitle, setAppTitle] = useState(saved.appTitle || t('appTitle'));
   const [companyLogo, setCompanyLogo] = useState<string | null>(saved.companyLogo || null);
@@ -303,6 +315,7 @@ const App: React.FC = () => {
   const [autoDrawDuration, setAutoDrawDuration] = useState<number>(saved.autoDrawDuration || 3);
   const [importStrategy, setImportStrategy] = useState<'merge' | 'overwrite'>('merge');
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
   const [rollingParticipants, setRollingParticipants] = useState<Partial<Participant>[]>([]);
   const [selectedPrizeId, setSelectedPrizeId] = useState<string | null>(saved.currentPrizeId || null);
   const [showConfig, setShowConfig] = useState(false);
@@ -616,7 +629,11 @@ const App: React.FC = () => {
   }, [t, showToast, showCustomConfirm, participants, winners, prizes]);
 
   const stopDraw = useCallback(() => {
-    if (drawIntervalRef.current) clearInterval(drawIntervalRef.current);
+    isDrawingRef.current = false;
+    if (drawIntervalRef.current) {
+      clearInterval(drawIntervalRef.current);
+      drawIntervalRef.current = null;
+    }
     if (drawingAudioRef.current) {
       drawingAudioRef.current.pause();
       drawingAudioRef.current.currentTime = 0;
@@ -627,6 +644,7 @@ const App: React.FC = () => {
 
     const targetBatchSize = Math.min(prize.batchSize || 1, prize.remain, eligiblePool.length);
     if (targetBatchSize <= 0) {
+      isDrawingRef.current = false;
       setIsDrawing(false);
       if (eligiblePool.length === 0) {
         showToast({
@@ -637,6 +655,21 @@ const App: React.FC = () => {
       }
       return;
     }
+
+    // calculate overall/global department sizes and wins across the entire event
+    const globalDeptSize = new Map<string, number>();
+    participants.forEach(p => {
+      const dept = (p.department || '未知部门').toLowerCase().trim();
+      globalDeptSize.set(dept, (globalDeptSize.get(dept) || 0) + 1);
+    });
+
+    const globalDeptWons = new Map<string, number>();
+    winners.forEach(w => {
+      const dept = (w.department || '未知部门').toLowerCase().trim();
+      globalDeptWons.set(dept, (globalDeptWons.get(dept) || 0) + 1);
+    });
+
+    const totalParticipantsCount = participants.length || 1;
 
     // ────────────── 部门配额计算 ──────────────
     const deptAvailable = new Map<string, number>();
@@ -708,8 +741,26 @@ const App: React.FC = () => {
         break;
       }
 
-      const maxWeight = Math.max(...availablePool.map(p => p.weight || 1), 1);
-      const normalizedWeights = availablePool.map(p => (p.weight || 1) / maxWeight);
+      const getAdjustedWeight = (p: Participant) => {
+        let wt = p.weight || 1;
+        if (isDeptBalanced) {
+          const dept = (p.department || '未知部门').toLowerCase().trim();
+          const actualWon = globalDeptWons.get(dept) || 0;
+          const deptSize = globalDeptSize.get(dept) || 1;
+          const proportion = deptSize / totalParticipantsCount;
+          
+          // Use total winners count as the multiplier basis
+          const totalWinnersCount = winners.length + batchWinners.length;
+          const expectedWon = totalWinnersCount * proportion;
+          if (actualWon > expectedWon && expectedWon > 0) {
+            wt = wt * (expectedWon / actualWon);
+          }
+        }
+        return wt;
+      };
+
+      const maxWeight = Math.max(...availablePool.map(getAdjustedWeight), 1);
+      const normalizedWeights = availablePool.map(p => getAdjustedWeight(p) / maxWeight);
 
       let totalWeight = normalizedWeights.reduce((sum, w) => sum + w, 0);
       let random = Math.random() * totalWeight;
@@ -745,9 +796,10 @@ const App: React.FC = () => {
         time: new Date().toLocaleString()
       });
 
-      // 更新部门计数
+      // 更新部门计数 (包含局部与全局)
       const dept = (selected.department || '未知部门').toLowerCase().trim();
       deptWon.set(dept, (deptWon.get(dept) || 0) + 1);
+      globalDeptWons.set(dept, (globalDeptWons.get(dept) || 0) + 1);
 
       const idx = currentPool.indexOf(selected);
       currentPool.splice(idx, 1);
@@ -786,6 +838,7 @@ const App: React.FC = () => {
       id: w.participantId
     })));
     setIsDrawing(false);
+    isDrawingRef.current = false;
 
     confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } }).catch(err => {
       console.warn('Confetti animation failed:', err);
@@ -805,10 +858,12 @@ const App: React.FC = () => {
   }, [stopDraw]);
 
   const startDraw = useCallback(() => {
-    if (!selectedPrizeId || isDrawing || eligiblePool.length === 0) return;
+    if (isDrawingRef.current || isDrawing || drawIntervalRef.current) return;
+    if (!selectedPrizeId || eligiblePool.length === 0) return;
     const prize = prizes.find(p => p.id === selectedPrizeId);
     if (!prize || prize.remain <= 0) { showToast({ type: 'warning', titleKey: 'warning', messageKey: 'prizeFullyDrawn' }); return; }
 
+    isDrawingRef.current = true;
     setIsDrawing(true);
     if (!isMuted) {
       const { index, customUrl } = audioState.draw;
@@ -833,25 +888,47 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const normalize = (str: string) =>
-      str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+    const removeVietnameseAccents = (str: string) => {
+      return str
+        .normalize('NFC')
+        .replace(/[àáạảãâầấậẩẫăằắặẳẵ]/g, 'a')
+        .replace(/[ÈÉẸẺẼÊỀẾỆỂỄ]/g, 'E')
+        .replace(/[èéẹẻẽêềếệểễ]/g, 'e')
+        .replace(/[ìíịỉĩ]/g, 'i')
+        .replace(/[òóọỏõôồốộổỗơờớợởỡ]/g, 'o')
+        .replace(/[ùúụủũưừứựửữ]/g, 'u')
+        .replace(/[ỳýỵỷỹ]/g, 'y')
+        .replace(/[đ]/g, 'd')
+        .replace(/[ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ]/g, 'A')
+        .replace(/[ÌÍỊỈĨ]/g, 'I')
+        .replace(/[ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ]/g, 'O')
+        .replace(/[ÙÚỤỦŨƯỪỨỰỬỮ]/g, 'U')
+        .replace(/[ỲÝỴỶỸ]/g, 'Y')
+        .replace(/[Đ]/g, 'D');
+    };
+
+    const normalize = (str: string) => {
+      if (!str) return '';
+      let res = removeVietnameseAccents(str);
+      return res.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+    };
 
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
-        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { raw: false });
         if (data.length === 0) return;
 
         const headers = Object.keys(data[0]);
         const colMap = {
-          staffId: headers.find(h => ['mã sf', 'employee code', 'mã nhân viên', '工号', 'id'].some(k => normalize(h).includes(normalize(k)))),
-          name: headers.find(h => ['tên', 'họ tên', '姓名', 'name'].some(k => normalize(h).includes(normalize(k)))),
-          dept: headers.find(h => ['bộ phận', 'phòng ban', '部门', 'bo phan'].some(k => normalize(h).includes(normalize(k)))),
+          staffId: headers.find(h => ['mã sf', 'employee code', 'mã nhân viên', '工号', 'id', 'ma nv', 'manhanvien', 'mã nv'].some(k => normalize(h).includes(normalize(k)))),
+          name: headers.find(h => ['tên', 'họ tên', '姓名', 'name', 'ho ten', 'hoten'].some(k => normalize(h).includes(normalize(k)))),
+          dept: headers.find(h => ['bộ phận', 'phòng ban', '部门', 'bo phan', 'phong ban', 'phongban'].some(k => normalize(h).includes(normalize(k)))),
           weight: headers.find(h =>
-            ['weight', '权重', 'trọng số', 'số lần', 'priority', 'ưu tiên'].some(k => normalize(h).includes(normalize(k)))
+            ['weight', '权重', 'trọng số', 'số lần', 'priority', 'ưu tiên', 'trong so', 'uuten', 'uutien'].some(k => normalize(h).includes(normalize(k)))
           ),
-          pool: headers.find(h => ['giải', 'giải thưởng', '奖池', 'pool', 'nhóm', '奖池'].some(k => normalize(h).includes(normalize(k)))),
+          pool: headers.find(h => ['giải', 'giải thưởng', '奖池', 'pool', 'nhóm', 'giai'].some(k => normalize(h).includes(normalize(k)))),
         };
 
         const imported = data.map((row: any, i) => {
@@ -873,9 +950,12 @@ const App: React.FC = () => {
             weight = isNaN(raw) || raw <= 0 ? 1 : Math.floor(raw);  // 防止小数、负数、0
           }
 
+          const rawId = String(row[colMap.staffId || ''] || row['A'] || '').trim().normalize('NFC');
+          const cleanStaffId = rawId.replace(/^0+/, '') || '0';
+
           return {
             id: `emp-${Date.now()}-${i}`,
-            staffId: String(row[colMap.staffId || ''] || row['A'] || '').trim().normalize('NFC'),
+            staffId: cleanStaffId,
             name: String(row[colMap.name || ''] || row['B'] || '').trim().normalize('NFC'),
             department: String(row[colMap.dept || ''] || row['C'] || '').trim().normalize('NFC') || t('unassigned'),
             pool,
@@ -890,8 +970,9 @@ const App: React.FC = () => {
           // Merge instead of overwriting directly, avoiding loss of previous data
           setParticipants(prev => {
             const merged = [...prev];
+            const cleanId = (id: string) => id.replace(/^0+/, '').trim().toLowerCase();
             imported.forEach(newP => {
-              const index = merged.findIndex(p => p.staffId.toLowerCase().trim() === newP.staffId.toLowerCase().trim());
+              const index = merged.findIndex(p => cleanId(p.staffId) === cleanId(newP.staffId));
               if (index !== -1) {
                 merged[index] = {
                   ...merged[index],
@@ -939,7 +1020,30 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+    const removeVietnameseAccents = (str: string) => {
+      return str
+        .normalize('NFC')
+        .replace(/[àáạảãâầấậẩẫăằắặẳẵ]/g, 'a')
+        .replace(/[ÈÉẸẺẼÊỀẾỆỂỄ]/g, 'E')
+        .replace(/[èéẹẻẽêềếệểễ]/g, 'e')
+        .replace(/[ìíịỉĩ]/g, 'i')
+        .replace(/[òóọỏõôồốộổỗơờớợởỡ]/g, 'o')
+        .replace(/[ùúụủũưừứựửữ]/g, 'u')
+        .replace(/[ỳýỵỷỹ]/g, 'y')
+        .replace(/[đ]/g, 'd')
+        .replace(/[ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ]/g, 'A')
+        .replace(/[ÌÍỊỈĨ]/g, 'I')
+        .replace(/[ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ]/g, 'O')
+        .replace(/[ÙÚỤỦŨƯỪỨỰỬỮ]/g, 'U')
+        .replace(/[ỲÝỴỶỸ]/g, 'Y')
+        .replace(/[Đ]/g, 'D');
+    };
+
+    const normalize = (str: string) => {
+      if (!str) return '';
+      let res = removeVietnameseAccents(str);
+      return res.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+    };
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -950,10 +1054,10 @@ const App: React.FC = () => {
 
         const headers = Object.keys(data[0]);
         const colMap = {
-          tier: headers.find(h => ['hạng', '等级', 'level'].some(k => normalize(h).includes(normalize(k)))),
-          name: headers.find(h => ['sản phẩm', '产品', '奖品', '品名'].some(k => normalize(h).includes(normalize(k)))) || headers[2],
-          total: headers.find(h => ['số lượng', '数量', 'total'].some(k => normalize(h).includes(normalize(k)))),
-          pool: headers.find(h => ['giải', '奖池', 'pool', 'nhóm'].some(k => normalize(h).includes(normalize(k)))),
+          tier: headers.find(h => ['hạng', 'hang', '等级', 'level', 'đẳng cấp', 'dang cap'].some(k => normalize(h).includes(normalize(k)))),
+          name: headers.find(h => ['sản phẩm', 'san pham', 'tên', 'ten', '产品', '奖品', '品名', 'tên giải thưởng', 'ten giai thuong'].some(k => normalize(h).includes(normalize(k)))) || headers[2],
+          total: headers.find(h => ['số lượng', 'so luong', '数量', 'total', 'số lượng giải', 'so luong giai'].some(k => normalize(h).includes(normalize(k)))),
+          pool: headers.find(h => ['giải', 'giai', '奖池', 'pool', 'nhóm', 'nhom'].some(k => normalize(h).includes(normalize(k)))),
         };
 
         const imported = data.map((row: any, i) => {
@@ -1037,20 +1141,38 @@ const App: React.FC = () => {
 
   // Fix: Implemented missing handleAudioUpload function to support custom sound effects
   const handleAudioUpload = useCallback(async (key: 'bg' | 'draw' | 'winner', file: File) => {
+    let savedToDB = false;
+    let dbErrorMsg = '';
     try {
       if (audioState[key].customUrl && audioState[key].customUrl.startsWith('blob:')) {
         URL.revokeObjectURL(audioState[key].customUrl);
       }
       
-      // Save file to IndexedDB for persistent storage across refreshes
-      await saveAudioToDB(key, file);
+      // Try to save file to IndexedDB for persistent storage
+      try {
+        await saveAudioToDB(key, file);
+        savedToDB = true;
+      } catch (dbErr: any) {
+        console.warn('IndexedDB write failed (likely sandbox iframe limitation):', dbErr);
+        dbErrorMsg = dbErr?.message || String(dbErr);
+      }
 
       const blobUrl = URL.createObjectURL(file);
       setAudioState(prev => ({
         ...prev,
         [key]: { ...prev[key], customUrl: blobUrl, customName: file.name, index: -1 }
       }));
-      showToast({ type: 'success', titleKey: 'success', messageKey: 'importSuccess' });
+
+      if (savedToDB) {
+        showToast({ type: 'success', titleKey: 'success', messageKey: 'importSuccess' });
+      } else {
+        showToast({
+          type: 'warning',
+          titleKey: 'warning',
+          messageKey: 'audioIDBWarning',
+          values: { error: dbErrorMsg }
+        });
+      }
     } catch (err) {
       console.error('Upload audio failed:', err);
       showToast({ type: 'error', titleKey: 'error', messageKey: 'importFailed' });
@@ -1176,6 +1298,23 @@ const App: React.FC = () => {
         </div>
       );
     }
+    if (selectedPrize && selectedPrize.remain > 0 && eligiblePool.length === 0) {
+      return (
+        <div className="text-center animate-fade-in flex flex-col items-center max-w-lg mx-auto">
+          <div className="w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center border-2 border-red-500/20 mb-6 text-red-500 animate-pulse">
+            <Users size={48} />
+          </div>
+          <h2 className="text-3xl font-black text-red-500 uppercase tracking-wide mb-4">{t('noEligibleParticipants') || 'Không có người đủ điều kiện'}</h2>
+          <p className="text-slate-300 font-semibold text-sm leading-relaxed mb-6">
+            {t('noEligibleParticipantsDesc')}
+          </p>
+          <p className="text-xs text-slate-500 italic max-w-xs leading-normal">
+            {t('noEligibleParticipantsHint') || 'Vui lòng kiểm tra lại danh sách nhân viên của nhóm này hoặc nhập thêm nhân viên mới từ Excel.'}
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="text-center animate-float flex flex-col items-center">
         {/* 用奖品图片替换 Sparkles 图标 */}
@@ -1241,6 +1380,12 @@ const App: React.FC = () => {
                 {renderMainAreaContent()}
               </div>
               <div className="mt-4 flex flex-col items-center gap-8 z-30 w-full pb-8">  {/* gap-10 → gap-8，整体更紧凑 */}
+                {selectedPrizeId && selectedPrize && selectedPrize.remain > 0 && eligiblePool.length === 0 && (
+                  <p className="text-yellow-400 text-xs md:text-sm font-black text-center bg-black/60 backdrop-blur-md px-6 py-3 rounded-2xl border border-yellow-500/30 animate-pulse tracking-wide max-w-md">
+                    ⚠️ {t('noEligibleParticipantsDesc')}
+                  </p>
+                )}
+
                 {/* 模式切换按钮保持不变 */}
                 {isDrawing && drawMode === 'manual' ? (
                   <button onClick={stopDraw} className="px-20 py-8 rounded-full text-2xl md:text-5xl font-black font-sans bg-red-600 text-white shadow-2xl animate-pulse active:scale-95">
@@ -1534,7 +1679,61 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   </div>
+
+                  {/* Advanced Actions inside Data Management */}
+                  <div className="p-6 bg-red-50/20 rounded-[2rem] border border-red-100 flex flex-col gap-3">
+                    <label className="text-xs font-black text-slate-500 uppercase flex items-center gap-2">
+                      <Trash2 size={14} className="text-red-500" /> {t('advancedManagement') || 'Quản lý nâng cao'}
+                    </label>
+                    <div className="flex flex-wrap gap-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          showCustomConfirm(
+                            t('confirmClearEmployeesTitle'),
+                            t('confirmClearEmployeesMessage'),
+                            () => {
+                              setParticipants([]);
+                              showToast({ type: 'success', titleKey: 'success', messageKey: 'employeesCleared' });
+                            }
+                          );
+                        }}
+                        className="py-3 px-6 rounded-2xl font-black text-xs transition-all tracking-wider bg-white hover:bg-red-50 text-red-600 border border-red-200 shadow-sm active:scale-95 flex items-center gap-2"
+                      >
+                        <Trash2 size={14} />
+                        {t('clearEmployeeList')}
+                      </button>
+                    </div>
+                  </div>
                 </section>
+
+                {/* Audit Trail Section */}
+                {auditLog && auditLog.length > 0 && (
+                  <section className="space-y-6">
+                    <h3 className="text-sm font-black text-red-600 uppercase border-l-[6px] border-red-600 pl-6 flex items-center gap-2">
+                      <Trash2 size={16} /> {t('auditTrailTitle')}
+                    </h3>
+                    <div className="p-6 bg-red-50/10 rounded-[2rem] border border-red-100 max-h-[250px] overflow-y-auto flex flex-col gap-3">
+                      {auditLog.map((log) => (
+                        <div key={log.id} className="p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-red-100/50 text-xs flex flex-col gap-1.5 shadow-sm">
+                          <div className="flex justify-between items-center text-slate-500 font-bold text-[10px]">
+                            <span>{log.timestamp}</span>
+                            <span className="text-red-600 bg-red-50 px-2.5 py-0.5 rounded-full font-black uppercase text-[8px] tracking-widest">{t('removedLabel')}</span>
+                          </div>
+                          <p className="text-slate-800 font-semibold leading-relaxed">
+                            {t('auditLogEntry', {
+                              name: log.winnerName,
+                              staffId: log.staffId,
+                              prizeName: log.prizeName,
+                              tier: log.tier
+                            })}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 {/* 新增：抽奖模式设置 */}
                 <section className="space-y-8">
                   <h3 className="text-sm font-black text-teal-600 uppercase border-l-[6px] border-teal-600 pl-6">
