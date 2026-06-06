@@ -163,6 +163,56 @@ const LotteryDisplayCard = memo<LotteryDisplayCardProps>(({
 
 
 
+const AUDIO_DB_NAME = 'lottery_audio_db';
+const AUDIO_STORE_NAME = 'audios';
+
+const saveAudioToDB = (key: string, file: Blob): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(AUDIO_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(AUDIO_STORE_NAME)) {
+        db.createObjectStore(AUDIO_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction(AUDIO_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(AUDIO_STORE_NAME);
+      const putRequest = store.put(file, key);
+      putRequest.onsuccess = () => resolve();
+      putRequest.onerror = () => reject(putRequest.error);
+    };
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const getAudioFromDB = (key: string): Promise<Blob | null> => {
+  return new Promise((resolve) => {
+    const request = indexedDB.open(AUDIO_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(AUDIO_STORE_NAME)) {
+        db.createObjectStore(AUDIO_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(AUDIO_STORE_NAME)) {
+        resolve(null);
+        return;
+      }
+      const transaction = db.transaction(AUDIO_STORE_NAME, 'readonly');
+      const store = transaction.objectStore(AUDIO_STORE_NAME);
+      const getRequest = store.get(key);
+      getRequest.onsuccess = () => resolve(getRequest.result || null);
+      getRequest.onerror = () => resolve(null);
+    };
+    request.onerror = () => resolve(null);
+  });
+};
+
+
 const compressImage = (base64Str: string, maxWidth = 300, maxHeight = 300, quality = 0.75): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -249,6 +299,9 @@ const App: React.FC = () => {
   const [companyLogo, setCompanyLogo] = useState<string | null>(saved.companyLogo || null);
   const [isMuted, setIsMuted] = useState(false);
   const [drawMode, setDrawMode] = useState<DrawMode>(saved.drawMode || 'manual');
+  const [isDeptBalanced, setIsDeptBalanced] = useState<boolean>(saved.isDeptBalanced !== undefined ? saved.isDeptBalanced : true);
+  const [autoDrawDuration, setAutoDrawDuration] = useState<number>(saved.autoDrawDuration || 3);
+  const [importStrategy, setImportStrategy] = useState<'merge' | 'overwrite'>('merge');
   const [isDrawing, setIsDrawing] = useState(false);
   const [rollingParticipants, setRollingParticipants] = useState<Partial<Participant>[]>([]);
   const [selectedPrizeId, setSelectedPrizeId] = useState<string | null>(saved.currentPrizeId || null);
@@ -292,10 +345,24 @@ const App: React.FC = () => {
     setShowConfirmModal(true);
   }, []);
 
-  const [audioState, setAudioState] = useState({
-    bg: { index: 0, customUrl: null as string | null, customName: null as string | null },
-    draw: { index: 0, customUrl: null as string | null, customName: null as string | null },
-    winner: { index: 0, customUrl: null as string | null, customName: null as string | null }
+  const [audioState, setAudioState] = useState(() => {
+    const defaultState = {
+      bg: { index: 0, customUrl: null as string | null, customName: null as string | null },
+      draw: { index: 0, customUrl: null as string | null, customName: null as string | null },
+      winner: { index: 0, customUrl: null as string | null, customName: null as string | null }
+    };
+    const savedAudio = localStorage.getItem(AUDIO_SETTINGS_KEY);
+    if (savedAudio) {
+      try {
+        const parsed = JSON.parse(savedAudio);
+        return {
+          bg: { index: parsed.bg?.index ?? 0, customName: parsed.bg?.customName || null, customUrl: null },
+          draw: { index: parsed.draw?.index ?? 0, customName: parsed.draw?.customName || null, customUrl: null },
+          winner: { index: parsed.winner?.index ?? 0, customName: parsed.winner?.customName || null, customUrl: null }
+        };
+      } catch (e) { }
+    }
+    return defaultState;
   });
 
   const drawIntervalRef = useRef<number | null>(null);
@@ -307,17 +374,33 @@ const App: React.FC = () => {
   const winnersRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const savedAudio = localStorage.getItem(AUDIO_SETTINGS_KEY);
-    if (savedAudio) {
-      try {
-        const parsed = JSON.parse(savedAudio);
-        setAudioState(prev => ({
-          bg: { ...prev.bg, index: parsed.bg?.index ?? 0, customName: parsed.bg?.customName || null, customUrl: null },
-          draw: { ...prev.draw, index: parsed.draw?.index ?? 0, customName: parsed.draw?.customName || null, customUrl: null },
-          winner: { ...prev.winner, index: parsed.winner?.index ?? 0, customName: parsed.winner?.customName || null, customUrl: null }
-        }));
-      } catch (e) { }
-    }
+    // Load custom audios from IndexedDB to avoid loss upon page refresh
+    const loadCustomAudios = async () => {
+      const keys: ('bg' | 'draw' | 'winner')[] = ['bg', 'draw', 'winner'];
+      const updates: Record<string, string> = {};
+      for (const key of keys) {
+        if (audioState[key].index === -1) {
+          const fileBlob = await getAudioFromDB(key);
+          if (fileBlob) {
+            updates[key] = URL.createObjectURL(fileBlob);
+          }
+        }
+      }
+      if (Object.keys(updates).length > 0) {
+        setAudioState(prev => {
+          const next = { ...prev };
+          Object.entries(updates).forEach(([key, blobUrl]) => {
+            const k = key as 'bg' | 'draw' | 'winner';
+            next[k] = {
+              ...next[k],
+              customUrl: blobUrl
+            };
+          });
+          return next;
+        });
+      }
+    };
+    loadCustomAudios();
   }, []);
 
   useEffect(() => {
@@ -327,7 +410,7 @@ const App: React.FC = () => {
       winner: { index: audioState.winner.index, customName: audioState.winner.customName }
     };
     localStorage.setItem(AUDIO_SETTINGS_KEY, JSON.stringify(cleaned));
-  }, [audioState]);
+  }, [audioState.bg.index, audioState.bg.customName, audioState.draw.index, audioState.draw.customName, audioState.winner.index, audioState.winner.customName]);
 
   useEffect(() => {
     if (bgAudioRef.current) {
@@ -353,24 +436,6 @@ const App: React.FC = () => {
       else bgAudioRef.current.volume = 0.25;
     }
   }, [isDrawing, rollingParticipants.length]);
-
-  useEffect(() => {
-    const state: LotteryState = { participants, prizes, winners, theme, currentPrizeId: selectedPrizeId, appTitle, companyLogo, drawMode, resetHistory, auditLog };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      if (e instanceof Error && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
-        console.warn('LocalStorage quota exceeded! Clearing logs & history to recover space.');
-        // Try saving a compacted state (no history/logs)
-        const compactedState = { ...state, resetHistory: [], auditLog: [] };
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(compactedState));
-        } catch (innerErr) {
-          console.error('Compact storage save also failed:', innerErr);
-        }
-      }
-    }
-  }, [participants, prizes, winners, theme, selectedPrizeId, appTitle, companyLogo, drawMode, resetHistory, auditLog]);
 
   const eligiblePool = useMemo(() => {
     const prize = prizes.find(p => p.id === selectedPrizeId);
@@ -412,6 +477,55 @@ const App: React.FC = () => {
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 4000);
   }, [t]);
+
+  useEffect(() => {
+    const state = { 
+      participants, 
+      prizes, 
+      winners, 
+      theme, 
+      currentPrizeId: selectedPrizeId, 
+      appTitle, 
+      companyLogo, 
+      drawMode, 
+      resetHistory, 
+      auditLog,
+      isDeptBalanced,
+      autoDrawDuration
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      if (e instanceof Error && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+        console.warn('LocalStorage quota exceeded! Clearing logs & history to recover space.');
+        // Try saving a compacted state (no history/logs)
+        const compactedState = { ...state, resetHistory: [], auditLog: [] };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(compactedState));
+        } catch (innerErr) {
+          console.warn('Compacted state also failed! Saving critical core data and dropping non-essential images.');
+          // Try saving critical data only (dropping logo & prize base64 images)
+          const criticalState = {
+            ...state,
+            resetHistory: [],
+            auditLog: [],
+            companyLogo: null,
+            prizes: prizes.map(p => ({ ...p, image: null }))
+          };
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(criticalState));
+          } catch (lastErr) {
+            console.error('Even critical state failed to save:', lastErr);
+          }
+          showToast({
+            type: 'error',
+            titleKey: 'warning',
+            messageKey: 'storageQuotaExceededWarning'
+          });
+        }
+      }
+    }
+  }, [participants, prizes, winners, theme, selectedPrizeId, appTitle, companyLogo, drawMode, resetHistory, auditLog, isDeptBalanced, autoDrawDuration, showToast]);
 
   const smartReset = useCallback((mode: ResetMode) => {
     let titleKey = '';
@@ -524,7 +638,7 @@ const App: React.FC = () => {
       return;
     }
 
-    // ────────────── 部门配额计算（后台隐藏） ──────────────
+    // ────────────── 部门配额计算 ──────────────
     const deptAvailable = new Map<string, number>();
     eligiblePool.forEach(p => {
       const dept = (p.department || '未知部门').toLowerCase().trim();
@@ -535,28 +649,34 @@ const App: React.FC = () => {
     const deptTargetQuota = new Map<string, number>();
     let remainingToAllocate = targetBatchSize;
 
-    deptAvailable.forEach((count, dept) => {
-      if (totalAvailable > 0) {
-        const proportion = count / totalAvailable;
-        let suggested = Math.round(proportion * targetBatchSize);
-        suggested = Math.max(0, Math.min(suggested, count));
-        deptTargetQuota.set(dept, suggested);
-        remainingToAllocate -= suggested;
-      }
-    });
-
-    while (remainingToAllocate > 0) {
-      const possibleDepts = Array.from(deptTargetQuota.keys()).filter(dept => {
-        const suggested = deptTargetQuota.get(dept) || 0;
-        const alreadyWon = winners.filter(w =>
-          w.prizeId === prize.id && (w.department || '未知部门').toLowerCase().trim() === dept
-        ).length;
-        return alreadyWon < suggested;
+    if (isDeptBalanced) {
+      deptAvailable.forEach((count, dept) => {
+        if (totalAvailable > 0) {
+          const proportion = count / totalAvailable;
+          let suggested = Math.round(proportion * targetBatchSize);
+          suggested = Math.max(0, Math.min(suggested, count));
+          deptTargetQuota.set(dept, suggested);
+          remainingToAllocate -= suggested;
+        }
       });
-      if (possibleDepts.length === 0) break;
-      const luckyDept = possibleDepts[Math.floor(Math.random() * possibleDepts.length)];
-      deptTargetQuota.set(luckyDept, (deptTargetQuota.get(luckyDept) || 0) + 1);
-      remainingToAllocate--;
+
+      while (remainingToAllocate > 0) {
+        const possibleDepts = Array.from(deptTargetQuota.keys()).filter(dept => {
+          const suggested = deptTargetQuota.get(dept) || 0;
+          const alreadyWon = winners.filter(w =>
+            w.prizeId === prize.id && (w.department || '未知部门').toLowerCase().trim() === dept
+          ).length;
+          return alreadyWon < suggested;
+        });
+        if (possibleDepts.length === 0) break;
+        const luckyDept = possibleDepts[Math.floor(Math.random() * possibleDepts.length)];
+        deptTargetQuota.set(luckyDept, (deptTargetQuota.get(luckyDept) || 0) + 1);
+        remainingToAllocate--;
+      }
+    } else {
+      deptAvailable.forEach((count, dept) => {
+        deptTargetQuota.set(dept, targetBatchSize);
+      });
     }
 
     // ────────────── 抽奖开始 ──────────────
@@ -677,7 +797,7 @@ const App: React.FC = () => {
       messageKey: 'winnersDrawn',
       values: { count: batchWinners.length }
     });
-  }, [eligiblePool, selectedPrizeId, prizes, winners, isMuted, audioState.winner, showToast]);
+  }, [eligiblePool, selectedPrizeId, prizes, winners, isMuted, audioState.winner, showToast, isDeptBalanced]);
 
   const stopDrawRef = useRef(stopDraw);
   useEffect(() => {
@@ -698,15 +818,16 @@ const App: React.FC = () => {
 
     const batchSize = Math.min(prize.batchSize || 1, prize.remain, eligiblePool.length);
     let count = 0;
+    const maxTicks = Math.round((autoDrawDuration * 1000) / 70);
     drawIntervalRef.current = window.setInterval(() => {
       const randoms = Array.from({ length: batchSize }, () => {
         const p = eligiblePool[Math.floor(Math.random() * eligiblePool.length)];
         return { name: p.name, staffId: p.staffId, department: p.department, id: p.id };
       });
       setRollingParticipants(randoms);
-      if (drawMode === 'auto' && count++ > 30) stopDrawRef.current();
+      if (drawMode === 'auto' && count++ > maxTicks) stopDrawRef.current();
     }, 70);
-  }, [selectedPrizeId, isDrawing, eligiblePool, prizes, drawMode, isMuted, audioState.draw, showToast]);
+  }, [selectedPrizeId, isDrawing, eligiblePool, prizes, drawMode, isMuted, audioState.draw, showToast, autoDrawDuration]);
 
   const handleEmployeeImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -762,25 +883,30 @@ const App: React.FC = () => {
           };
         }).filter(p => p.name && p.staffId);
 
-        // Merge instead of overwriting directly, avoiding loss of previous data
-        setParticipants(prev => {
-          const merged = [...prev];
-          imported.forEach(newP => {
-            const index = merged.findIndex(p => p.staffId.toLowerCase().trim() === newP.staffId.toLowerCase().trim());
-            if (index !== -1) {
-              merged[index] = {
-                ...merged[index],
-                name: newP.name,
-                department: newP.department,
-                pool: newP.pool,
-                weight: newP.weight
-              };
-            } else {
-              merged.push(newP);
-            }
+        // Apply import strategy (merge or overwrite)
+        if (importStrategy === 'overwrite') {
+          setParticipants(imported);
+        } else {
+          // Merge instead of overwriting directly, avoiding loss of previous data
+          setParticipants(prev => {
+            const merged = [...prev];
+            imported.forEach(newP => {
+              const index = merged.findIndex(p => p.staffId.toLowerCase().trim() === newP.staffId.toLowerCase().trim());
+              if (index !== -1) {
+                merged[index] = {
+                  ...merged[index],
+                  name: newP.name,
+                  department: newP.department,
+                  pool: newP.pool,
+                  weight: newP.weight
+                };
+              } else {
+                merged.push(newP);
+              }
+            });
+            return merged;
           });
-          return merged;
-        });
+        }
 
         // 打印分布
         const poolStats = imported.reduce((acc, p) => {
@@ -851,29 +977,34 @@ const App: React.FC = () => {
           };
         }).filter(p => p.name && p.total > 0);
 
-        // Merge instead of overwriting directly, preserving existing records and relations
-        setPrizes(prev => {
-          const merged = [...prev];
-          imported.forEach(newPrize => {
-            const index = merged.findIndex(p => 
-              p.tier.toLowerCase().trim() === newPrize.tier.toLowerCase().trim() &&
-              p.name.toLowerCase().trim() === newPrize.name.toLowerCase().trim()
-            );
-            if (index !== -1) {
-              const original = merged[index];
-              const totalDiff = newPrize.total - original.total;
-              merged[index] = {
-                ...original,
-                total: newPrize.total,
-                remain: Math.max(0, original.remain + totalDiff),
-                pool: newPrize.pool
-              };
-            } else {
-              merged.push(newPrize);
-            }
+        // Apply import strategy (merge or overwrite)
+        if (importStrategy === 'overwrite') {
+          setPrizes(imported);
+        } else {
+          // Merge instead of overwriting directly, preserving existing records and relations
+          setPrizes(prev => {
+            const merged = [...prev];
+            imported.forEach(newPrize => {
+              const index = merged.findIndex(p => 
+                p.tier.toLowerCase().trim() === newPrize.tier.toLowerCase().trim() &&
+                p.name.toLowerCase().trim() === newPrize.name.toLowerCase().trim()
+              );
+              if (index !== -1) {
+                const original = merged[index];
+                const totalDiff = newPrize.total - original.total;
+                merged[index] = {
+                  ...original,
+                  total: newPrize.total,
+                  remain: Math.max(0, original.remain + totalDiff),
+                  pool: newPrize.pool
+                };
+              } else {
+                merged.push(newPrize);
+              }
+            });
+            return merged;
           });
-          return merged;
-        });
+        }
 
         console.log('奖项奖池分布：', imported.map(p => `${p.tier} - ${p.name} → ${p.pool}`));
 
@@ -905,11 +1036,15 @@ const App: React.FC = () => {
   };
 
   // Fix: Implemented missing handleAudioUpload function to support custom sound effects
-  const handleAudioUpload = useCallback((key: 'bg' | 'draw' | 'winner', file: File) => {
+  const handleAudioUpload = useCallback(async (key: 'bg' | 'draw' | 'winner', file: File) => {
     try {
       if (audioState[key].customUrl && audioState[key].customUrl.startsWith('blob:')) {
         URL.revokeObjectURL(audioState[key].customUrl);
       }
+      
+      // Save file to IndexedDB for persistent storage across refreshes
+      await saveAudioToDB(key, file);
+
       const blobUrl = URL.createObjectURL(file);
       setAudioState(prev => ({
         ...prev,
@@ -1368,6 +1503,37 @@ const App: React.FC = () => {
                     <div className="relative p-8 bg-blue-50 rounded-3xl border-2 border-blue-100 flex flex-col items-center gap-2 cursor-pointer hover:bg-blue-100"><Database className="text-blue-600" size={32} /><span className="text-xs font-black uppercase">{t('importStaff')}</span><input type="file" accept=".xlsx,.xls,.csv" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleEmployeeImport} /></div>
                     <div className="relative p-8 bg-emerald-50 rounded-3xl border-2 border-emerald-100 flex flex-col items-center gap-2 cursor-pointer hover:bg-emerald-100"><Trophy className="text-emerald-600" size={32} /><span className="text-xs font-black uppercase">{t('importAwards')}</span><input type="file" accept=".xlsx,.xls,.csv" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handlePrizeImport} /></div>
                   </div>
+
+                  {/* Select Import Strategy toggle */}
+                  <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100 flex flex-col gap-3">
+                    <label className="text-xs font-black text-slate-500 uppercase flex items-center gap-2">
+                      <Layers size={14} /> {t('importStrategy')}
+                    </label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        type="button"
+                        onClick={() => setImportStrategy('merge')}
+                        className={`py-3.5 px-6 rounded-2xl font-black text-xs transition-all tracking-wider ${
+                          importStrategy === 'merge'
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md'
+                            : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}
+                      >
+                        {t('importStrategyMerge')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImportStrategy('overwrite')}
+                        className={`py-3.5 px-6 rounded-2xl font-black text-xs transition-all tracking-wider ${
+                          importStrategy === 'overwrite'
+                            ? 'bg-red-600 hover:bg-red-700 text-white shadow-md'
+                            : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                        }`}
+                      >
+                        {t('importStrategyOverwrite')}
+                      </button>
+                    </div>
+                  </div>
                 </section>
                 {/* 新增：抽奖模式设置 */}
                 <section className="space-y-8">
@@ -1390,18 +1556,18 @@ const App: React.FC = () => {
                         type="button"
                         onClick={() => setDrawMode(drawMode === 'auto' ? 'manual' : 'auto')}
                         className={`
-          relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent 
-          transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2
-          ${drawMode === 'auto' ? 'bg-teal-600' : 'bg-gray-300'}
-        `}
+                          relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent 
+                          transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2
+                          ${drawMode === 'auto' ? 'bg-teal-600' : 'bg-gray-300'}
+                        `}
                       >
                         <span
                           aria-hidden="true"
                           className={`
-            pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 
-            transition duration-200 ease-in-out
-            ${drawMode === 'auto' ? 'translate-x-5' : 'translate-x-0'}
-          `}
+                            pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 
+                            transition duration-200 ease-in-out
+                            ${drawMode === 'auto' ? 'translate-x-5' : 'translate-x-0'}
+                          `}
                         />
                       </button>
                     </div>
@@ -1409,10 +1575,69 @@ const App: React.FC = () => {
                     {/* 小提示 */}
                     <p className="mt-3 text-xs text-slate-500">
                       {drawMode === 'auto'
-                        ? t('autoDrawDesc')  // 自动模式：滚动约30次后自动停止
-                        : t('manualDrawDesc') // 手动模式：需点击“停止抽奖”出结果
+                        ? t('autoDrawDesc')  // 自动模式
+                        : t('manualDrawDesc') // 手动模式
                       }
                     </p>
+
+                    {/* 部门平衡算法 Toggle */}
+                    <div className="flex items-center justify-between mt-6 pt-6 border-t border-slate-200">
+                      <div className="flex flex-col gap-0.5 max-w-[80%]">
+                        <span className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                          <Building size={16} className="text-indigo-500" /> {t('isDeptBalanced')}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {t('isDeptBalancedDesc')}
+                        </span>
+                      </div>
+                      
+                      <button
+                        type="button"
+                        onClick={() => setIsDeptBalanced(!isDeptBalanced)}
+                        className={`
+                          relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent 
+                          transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                          ${isDeptBalanced ? 'bg-indigo-600' : 'bg-gray-300'}
+                        `}
+                      >
+                        <span
+                          className={`
+                            pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 
+                            transition duration-200 ease-in-out
+                            ${isDeptBalanced ? 'translate-x-5' : 'translate-x-0'}
+                          `}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Auto Mode duration slider */}
+                    {drawMode === 'auto' && (
+                      <div className="mt-6 pt-6 border-t border-slate-200 flex flex-col gap-3">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs font-black text-slate-500 uppercase flex items-center gap-2">
+                            <Zap size={14} className="text-teal-500" /> {t('autoDrawDuration')}
+                          </label>
+                          <span className="text-sm font-black text-teal-600 bg-teal-50 px-3 py-1 rounded-full">{autoDrawDuration}s</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="10"
+                          step="1"
+                          value={autoDrawDuration}
+                          onChange={(e) => setAutoDrawDuration(Number(e.target.value))}
+                          className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-teal-600 focus:outline-none"
+                        />
+                        <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                          <span>1s</span>
+                          <span>2s</span>
+                          <span>3s</span>
+                          <span>5s</span>
+                          <span>7s</span>
+                          <span>10s</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </section>
               </div>

@@ -101,7 +101,14 @@ export const resources = {
       autoDraw: "自动抽奖",
       manualDraw: "手动抽奖",
       autoDrawDesc: "自动模式：滚动约30次后自动停止并揭晓结果",
-      manualDrawDesc: "手动模式：需手动点击“停止抽奖”揭晓结果"
+      manualDrawDesc: "手动模式：需手动点击“停止抽奖”揭晓结果",
+      isDeptBalanced: "部门平衡算法",
+      isDeptBalancedDesc: "按部门比例分配中奖几率，避免极度不均（可调整）",
+      autoDrawDuration: "单次滚动时间 (秒)",
+      importStrategy: "数据导入模式",
+      importStrategyMerge: "合并新数据",
+      importStrategyOverwrite: "覆盖旧数据 (全新安装)",
+      storageQuotaExceededWarning: "浏览器存储空间已满（图片过大）。请压缩奖品图片或 Logo 以免数据丢失。"
     }
   },
   en: {
@@ -206,7 +213,14 @@ export const resources = {
       autoDraw: "Auto Draw",
       manualDraw: "Manual Draw",
       autoDrawDesc: "Auto mode: Stops automatically after ~30 rolls",
-      manualDrawDesc: "Manual mode: Click 'Stop Draw' to reveal results"
+      manualDrawDesc: "Manual mode: Click 'Stop Draw' to reveal results",
+      isDeptBalanced: "Dept Balance Algorithm",
+      isDeptBalancedDesc: "Balance winning employees proportionally among departments to avoid skewing",
+      autoDrawDuration: "Roll Duration Time (sec)",
+      importStrategy: "Data Import Mode",
+      importStrategyMerge: "Merge & Update",
+      importStrategyOverwrite: "Overwrite (Clean Install)",
+      storageQuotaExceededWarning: "Browser storage is full (images too large). Please compress prize images/logos to prevent loss."
     }
   },
   vi: {
@@ -311,7 +325,14 @@ export const resources = {
       autoDraw: "Tự động quay",
       manualDraw: "Quay thủ công",
       autoDrawDesc: "Chế độ tự động: Tự dừng sau khoảng 30 lần cuộn",
-      manualDrawDesc: "Chế độ thủ công: Nhấn 'Dừng quay' để công bố kết quả"
+      manualDrawDesc: "Chế độ thủ công: Nhấn 'Dừng quay' để công bố kết quả",
+      isDeptBalanced: "Cân bằng tỉ lệ phòng ban",
+      isDeptBalancedDesc: "Phân bổ tỉ lệ thắng chia đều theo cơ cấu phòng ban (Tránh lệch phòng)",
+      autoDrawDuration: "Thời gian quay số (giây)",
+      importStrategy: "Chế độ nhập dữ liệu",
+      importStrategyMerge: "Hợp nhất & Cập nhật",
+      importStrategyOverwrite: "Xóa cũ & Ghi đè",
+      storageQuotaExceededWarning: "Bộ bộ lưu trữ trình duyệt (LocalStorage) bị đầy do ảnh quá lớn. Hãy nén bớt hình ảnh của giải thưởng để tránh mất dữ liệu."
     }
   }
 } as const;
